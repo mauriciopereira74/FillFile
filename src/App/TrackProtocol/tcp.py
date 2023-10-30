@@ -1,8 +1,10 @@
 import socket
 import pickle
 import os
+import json
 
 HEADERSIZE = 10
+
 
 def run_server():
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -18,25 +20,24 @@ def run_server():
         client_name = f"FS_NODE{len(connected_clients) + 1}"
         connected_clients.append((client_name, address))
 
-
         full_msg = b''
-        new_msg = True
-        msglen = 0
 
-        while True:
-            msg = clientsocket.recv(16)
-            if new_msg:
-                msglen = int(msg[:HEADERSIZE])
-                new_msg = False
+        # Lê exatamente 1 byte para a message_type
+        message_type_bytes = clientsocket.recv(1)
 
-            full_msg += msg
+        # Decodifica a mensagem_type
+        message_type = int.from_bytes(message_type_bytes, byteorder='big')
 
-            if len(full_msg)-HEADERSIZE == msglen:
-                print(pickle.loads(full_msg[HEADERSIZE:]))
+        if message_type == 0:
 
-                break
+            pass
+
+        if message_type == 1:
+
+            pass
 
         clientsocket.close()
+
 
 def run_client():
     ip_address, port, directory = input("Enter [ip address] [port] [directory]: \n").split()
@@ -46,11 +47,18 @@ def run_client():
     client.connect((ip_address, port))
 
     files_list = os.listdir(directory)
+    message_type = 9
 
-    packet = pickle.dumps(files_list)
-    packet = bytes(f"{len(packet):<{HEADERSIZE}}", 'utf-8') + packet
+    message_type_bytes = message_type.to_bytes(1, byteorder='big')
+
+    message = {"type": message_type, "files": files_list}
+    message = pickle.dumps(message)
+
+    # Envia a mensagem_type seguida pela mensagem
+    packet = message_type_bytes + bytes(f"{len(message):<{HEADERSIZE}}", 'utf-8') + message
 
     client.send(packet)
+
 
 if __name__ == "__main__":
     choice = input("Press 1 to run as server, Press 2 to run as client: ")
