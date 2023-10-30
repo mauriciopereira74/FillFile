@@ -28,11 +28,27 @@ def run_server():
         # Decodifica a mensagem_type
         message_type = int.from_bytes(message_type_bytes, byteorder='big')
 
-        if message_type == 0:
+        # type 1 : 2 bytes de length, 2 bytes de porta udp, length da lista
+
+        if message_type == 1:
+
+            length_temp = clientsocket.recv(2)
+            list_length = int.from_bytes(length_temp, byteorder='big')
+
+            port_temp = clientsocket.recv(2)
+            port_udp = int.from_bytes(port_temp, byteorder='big')
+
+            files_list = []
+            for _ in range(list_length):
+                file_bytes = clientsocket.recv(
+                    HEADERSIZE)  # assumindo que os nomes dos arquivos são menores que HEADERSIZE
+                files_list.append(str(file_bytes))
+
+            print(f"Received files list: {files_list}")
 
             pass
 
-        if message_type == 1:
+        if message_type == 2:
 
             pass
 
@@ -47,17 +63,29 @@ def run_client():
     client.connect((ip_address, port))
 
     files_list = os.listdir(directory)
-    message_type = 9
 
-    message_type_bytes = message_type.to_bytes(1, byteorder='big')
+    message_type = 1
 
-    message = {"type": message_type, "files": files_list}
-    message = pickle.dumps(message)
+    if message_type == 1 :
 
-    # Envia a mensagem_type seguida pela mensagem
-    packet = message_type_bytes + bytes(f"{len(message):<{HEADERSIZE}}", 'utf-8') + message
+        length = 100
 
-    client.send(packet)
+        message_type_bytes = message_type.to_bytes(1, byteorder='big')
+        lenght_bytes = length.to_bytes(2, byteorder='big')
+
+        message = {"type": message_type, "lenght": length, "files": files_list}
+        message = pickle.dumps(message)
+
+        # Envia a mensagem_type seguida pela mensagem
+        packet = message_type_bytes + lenght_bytes + bytes(f"{len(message):<{HEADERSIZE}}", 'utf-8') + message
+
+        client.send(packet)
+        pass
+
+    if message_type == 2:
+
+        pass
+    
 
 
 if __name__ == "__main__":
