@@ -74,6 +74,24 @@ def run_server():
             packet = length_bytes + available_files_bytes
 
             clientsocket.sendall(packet)
+        if message_type == 3:
+            file_length = clientsocket.recv(2)
+            file_length = int.from_bytes(file_length, byteorder='big')
+
+            file_request = clientsocket.recv(file_length).decode("utf-8")
+
+            if file in file_locator:
+                file_location = ', '.join(file_locator[file])
+                file_location_bytes = file_location.encode("utf-8")
+                length = len(file_location_bytes)
+
+                length_bytes = length.to_bytes(2, byteorder='big')
+
+                packet = length_bytes + file_location_bytes
+
+                clientsocket.sendall(packet)
+            else:
+                clientsocket.send("File not found".encode("utf-8"))
 
         clientsocket.close()
 
@@ -84,51 +102,78 @@ def run_client():
 
     ip_address = "127.0.0.1"
     port = 1111
-    directory = "../../../cache"
+    directory = "../../../cache2"
 
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     client.connect((ip_address, port))
 
-    files_list = os.listdir(directory)
-    files_list.sort()
-
-    message_type = 2
+    message_type = 3
 
     if message_type == 1:
-        length = len(files_list)
-
-        message_type_bytes = message_type.to_bytes(1, byteorder='big')
-        length_bytes = length.to_bytes(2, byteorder='big')
-        port_bytes = port.to_bytes(2, byteorder='big')
-
-        files_data = [f"{file},{os.path.getsize(os.path.join(directory, file))}" for file in files_list]
-        files_list_str = '|'.join(files_data)
-        files_list_bytes = files_list_str.encode("utf-8")
-
-        packet = message_type_bytes + length_bytes + port_bytes + files_list_bytes
-
-        client.sendall(packet)
+        type_1(client, directory, port)
 
     if message_type == 2:
-        message_type_bytes = message_type.to_bytes(1, byteorder='big')
-
-        packet = message_type_bytes
-
-        client.send(packet)
-
-        # Receive the list of available files from the server
-        length_bytes = client.recv(2)
-        length = int.from_bytes(length_bytes, byteorder='big')
-        available_files_bytes = client.recv(length)
-        available_files_str = available_files_bytes.decode("utf-8")
-        available_files = available_files_str.split('|')
-        print(f"Available files: {available_files}")
+        type_2(client)
 
     if message_type == 3:
-        
+        type_3(client)
+
         pass
 
     client.close()
+
+
+def type_1(client, directory, port):
+
+    message_type=1
+
+    files_list = os.listdir(directory)
+    files_list.sort()
+
+    length = len(files_list)
+
+    message_type_bytes = message_type.to_bytes(1, byteorder='big')
+    length_bytes = length.to_bytes(2, byteorder='big')
+    port_bytes = port.to_bytes(2, byteorder='big')
+
+    files_data = [f"{file},{os.path.getsize(os.path.join(directory, file))}" for file in files_list]
+    files_list_str = '|'.join(files_data)
+    files_list_bytes = files_list_str.encode("utf-8")
+
+    packet = message_type_bytes + length_bytes + port_bytes + files_list_bytes
+
+    client.send(packet)
+
+def type_2(client):
+    message_type = 2
+    message_type_bytes = message_type.to_bytes(1, byteorder='big')
+
+    packet = message_type_bytes
+
+    client.send(packet)
+
+    # Receive the list of available files from the server
+    length_bytes = client.recv(2)
+    length = int.from_bytes(length_bytes, byteorder='big')
+    available_files_bytes = client.recv(length)
+    available_files_str = available_files_bytes.decode("utf-8")
+    available_files = available_files_str.split('|')
+    print(f"Available files: {available_files}")
+
+def type_3(client):
+    message_type = 3
+
+    file_request = input("Enter the file you want to get information about: ")
+    file_lenght = len(file_request)
+    file_lenght_bytes = file_lenght.to_bytes(2, byteorder='big')
+    message_type_bytes = message_type.to_bytes(1, byteorder='big')
+
+    packet = message_type_bytes + file_lenght_bytes + file_request.encode("utf-8")
+    client.send(packet)
+
+    # Receber a resposta do servidor
+    response = client.recv(1024).decode("utf-8")
+    print(f"Server's response: {response}")
 
 
 if __name__ == "__main__":
@@ -140,3 +185,5 @@ if __name__ == "__main__":
         run_client()
     else:
         print("Invalid choice. Please choose 1 or 2.")
+
+
