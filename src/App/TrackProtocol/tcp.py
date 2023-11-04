@@ -50,6 +50,8 @@ def run_server():
 
         if message_type == 2:
 
+            print("tipo 2")
+
             pass
 
         clientsocket.close()
@@ -64,7 +66,7 @@ def run_client():
 
     files_list = os.listdir(directory)
 
-    message_type = 1
+    message_type = 2
 
     if message_type == 1 :
 
@@ -83,6 +85,13 @@ def run_client():
         pass
 
     if message_type == 2:
+
+        message_type_bytes = message_type.to_bytes(1, byteorder='big')
+
+        packet = message_type_bytes
+
+        client.send(packet)
+
 
         pass
     
