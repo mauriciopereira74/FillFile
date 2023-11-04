@@ -27,6 +27,7 @@ def run_server():
         message_type = int.from_bytes(message_type_bytes, byteorder='big')
 
         if message_type == 1:
+            #adiconar tamanho dos ficheiros
             length_temp = clientsocket.recv(2)
             list_length = int.from_bytes(length_temp, byteorder='big')
 
@@ -51,7 +52,9 @@ def run_server():
 
 
 def run_client():
-    ip_address = "127.0.0.1"
+    # ip_address, port, directory = input("Enter [ip address] [port] [directory]: \n").split()
+    # port = int(port)
+    ip_address = "192.168.1.233"
     port = 1111
     directory = "../../../cache"
 
@@ -63,16 +66,18 @@ def run_client():
 
     message_type = 1
 
+
     if message_type == 1:
         length = len(files_list)
 
         message_type_bytes = message_type.to_bytes(1, byteorder='big')
         length_bytes = length.to_bytes(2, byteorder='big')
+        port_bytes = port.to_bytes(2,byteorder='big')
 
         files_list_str = '|'.join(files_list)
         files_list_bytes = files_list_str.encode("utf-8")
 
-        packet = message_type_bytes + length_bytes + files_list_bytes
+        packet = message_type_bytes + length_bytes + port_bytes + files_list_bytes
 
         client.sendall(packet)
 
