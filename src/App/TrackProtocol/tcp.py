@@ -1,9 +1,7 @@
 import socket
-import pickle
 import os
-import json
 
-HEADERSIZE = 10
+HEADERSIZE = 15
 
 
 def run_server():
@@ -22,79 +20,68 @@ def run_server():
 
         full_msg = b''
 
-        # Lê exatamente 1 byte para a message_type
+        # Read exactly 1 byte for the message_type
         message_type_bytes = clientsocket.recv(1)
 
-        # Decodifica a mensagem_type
+        # Decode the message_type
         message_type = int.from_bytes(message_type_bytes, byteorder='big')
 
-        # type 1 : 2 bytes de length, 2 bytes de porta udp, length da lista
-
         if message_type == 1:
-
             length_temp = clientsocket.recv(2)
             list_length = int.from_bytes(length_temp, byteorder='big')
 
             port_temp = clientsocket.recv(2)
             port_udp = int.from_bytes(port_temp, byteorder='big')
 
-            files_list = []
-            for _ in range(list_length):
-                file_bytes = clientsocket.recv(
-                    HEADERSIZE)  # assumindo que os nomes dos arquivos são menores que HEADERSIZE
-                files_list.append(str(file_bytes))
+            full_msg = b''
+            while True:
+                chunk = clientsocket.recv(16)
+                if not chunk:
+                    break
+                full_msg += chunk
+
+            files_list = full_msg.decode("utf-8").split('|')
 
             print(f"Received files list: {files_list}")
 
-            pass
-
         if message_type == 2:
-
-            print("tipo 2")
-
             pass
 
         clientsocket.close()
 
 
 def run_client():
-    ip_address, port, directory = input("Enter [ip address] [port] [directory]: \n").split()
-    port = int(port)
+    ip_address = "127.0.0.1"
+    port = 1111
+    directory = "../../../cache"
 
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     client.connect((ip_address, port))
 
     files_list = os.listdir(directory)
+    files_list.sort()
 
-    message_type = 2
+    message_type = 1
 
-    if message_type == 1 :
-
-        length = 100
+    if message_type == 1:
+        length = len(files_list)
 
         message_type_bytes = message_type.to_bytes(1, byteorder='big')
-        lenght_bytes = length.to_bytes(2, byteorder='big')
+        length_bytes = length.to_bytes(2, byteorder='big')
 
-        message = {"type": message_type, "lenght": length, "files": files_list}
-        message = pickle.dumps(message)
+        files_list_str = '|'.join(files_list)
+        files_list_bytes = files_list_str.encode("utf-8")
 
-        # Envia a mensagem_type seguida pela mensagem
-        packet = message_type_bytes + lenght_bytes + bytes(f"{len(message):<{HEADERSIZE}}", 'utf-8') + message
+        packet = message_type_bytes + length_bytes + files_list_bytes
 
-        client.send(packet)
-        pass
+        client.sendall(packet)
 
     if message_type == 2:
-
         message_type_bytes = message_type.to_bytes(1, byteorder='big')
 
         packet = message_type_bytes
 
         client.send(packet)
-
-
-        pass
-    
 
 
 if __name__ == "__main__":
