@@ -29,6 +29,7 @@ def run_server():
         message_type = int.from_bytes(message_type_bytes, byteorder='big')
 
         if message_type == 1:
+
             # Adicionar tamanho dos ficheiros
             length_temp = clientsocket.recv(2)
             list_length = int.from_bytes(length_temp, byteorder='big')
@@ -37,6 +38,7 @@ def run_server():
             port_udp = int.from_bytes(port_temp, byteorder='big')
 
             full_msg = b''
+
             while True:
                 chunk = clientsocket.recv(16)
                 if not chunk:
@@ -44,7 +46,7 @@ def run_server():
                 full_msg += chunk
 
             files_data = full_msg.decode("utf-8").split('|')
-
+            print("here")
             # Adicionar arquivos e tamanhos ao dicionário file_sizes
             for file_data in files_data:
                 file, size = file_data.split(',')
@@ -53,9 +55,9 @@ def run_server():
             # Adicionar arquivos ao dicionário file_locator
             for file in file_sizes:
                 if file not in file_locator:
-                    file_locator[file] = [address[0]]
+                    file_locator[file] = set([address[0]])
                 else:
-                    file_locator[file].append(address[0])
+                    file_locator[file].add(address[0])
 
             # Atualizar a lista de arquivos disponíveis
             available_files = list(file_sizes.keys())
@@ -63,6 +65,8 @@ def run_server():
             print(f"File sizes: {file_sizes}")
             print(f"File locator: {file_locator}")
             print(f"Available files: {available_files}")
+
+
 
         if message_type == 2:
             available_files_str = '|'.join(available_files)
@@ -97,30 +101,36 @@ def run_server():
 
 
 def run_client():
-    # ip_address, port, directory = input("Enter [ip address] [port] [directory]: \n").split()
-    # port = int(port)
-
-    ip_address = "127.0.0.1"
-    port = 1111
-    directory = "../../../cache2"
-
+    ip_address, port, directory = input("Enter [ip address] [port] [directory]: ").split()
+    port = int(port)
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     client.connect((ip_address, port))
-
-    message_type = 3
-
-    if message_type == 1:
-        type_1(client, directory, port)
-
-    if message_type == 2:
-        type_2(client)
-
-    if message_type == 3:
-        type_3(client)
-
-        pass
-
+    type_1(client, directory, port)
     client.close()
+
+    while True:
+        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client.connect((ip_address, port))
+
+        os.system('clear')  # Clear the console
+
+        print_menu()
+        message_type = int(input("Enter message type: "))
+
+        if message_type == 2:
+            type_2(client)
+        if message_type == 3:
+            type_3(client)
+        if message_type == 0:
+            break
+
+        if message_type != 0 and message_type != 2 and message_type != 3:
+            print("\nInvalid Option....\n")
+
+
+
+        input("Press Enter to continue...")
+
 
 
 def type_1(client, directory, port):
@@ -158,7 +168,9 @@ def type_2(client):
     available_files_bytes = client.recv(length)
     available_files_str = available_files_bytes.decode("utf-8")
     available_files = available_files_str.split('|')
+    print("\n----------------------------------------------------------------")
     print(f"Available files: {available_files}")
+    print("------------------------------------------------------------------\n")
 
 def type_3(client):
     message_type = 3
@@ -174,6 +186,16 @@ def type_3(client):
     # Receber a resposta do servidor
     response = client.recv(1024).decode("utf-8")
     print(f"Server's response: {response}")
+
+
+def print_menu():
+    print("---------------------------------------------------------------------------")
+    print("WELCOME! CHOOSE ONE OF OUR MENU OPTIONS:")
+    print("---------------------------------------------------------------------------")
+    print("2 : Ask for the files that tracker has information")
+    print("3 : Download a file of your choice")
+    print("0 : Exit")
+    print("---------------------------------------------------------------------------")
 
 
 if __name__ == "__main__":
