@@ -4,8 +4,6 @@ import threading
 
 HEADERSIZE = 15
 
-
-
 def handle_client(clientsocket, address, file_locator, file_sizes, available_files):
     global available_files_lock
 
@@ -141,17 +139,43 @@ def run_client():
             print("\nInvalid Option....\n")
 
 
-
         input("Press Enter to continue...")
+
+
+def split_file(file_path, chunk_size, output_directory):
+    if os.path.isfile(file_path):
+        file_name, file_extension = os.path.splitext(os.path.basename(file_path))
+        parent_directory = os.path.dirname(os.path.dirname(output_directory))  # Alteração feita aqui
+        file_parts_directory = os.path.join(parent_directory, f"{file_name}_parts")  # Caminho de saída modificado
+        if not os.path.exists(file_parts_directory):
+            os.makedirs(file_parts_directory)
+            with open(file_path, 'rb') as file:
+                index = 1
+                while True:
+                    data = file.read(chunk_size)
+                    if not data:
+                        break
+                    part_file_name = f"{file_name}_part{index}{file_extension}"
+                    with open(os.path.join(file_parts_directory, part_file_name), 'wb') as part_file:
+                        part_file.write(data)
+                    index += 1
+        else:
+            print(f"Directory {file_parts_directory} already exists. Skipping creation.")
+    else:
+        print(f"The provided path '{file_path}' does not point to a file.")
+
 
 
 
 def type_1(client, directory, port):
+    message_type = 1
 
-    message_type=1
-
-    files_list = os.listdir(directory)
+    files_list = [file for file in os.listdir(directory) if not file.startswith('.')]
     files_list.sort()
+
+    for file in files_list:
+        file_directory = os.path.join(directory, f"{os.path.splitext(file)[0]}_parts")
+        split_file(os.path.join(directory, file), 10, file_directory)
 
     length = len(files_list)
 
@@ -166,6 +190,7 @@ def type_1(client, directory, port):
     packet = message_type_bytes + length_bytes + port_bytes + files_list_bytes
 
     client.send(packet)
+
 
 def type_2(client):
     message_type = 2
