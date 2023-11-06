@@ -4,7 +4,7 @@ import threading
 
 HEADERSIZE = 15
 
-available_files_lock = threading.Lock()
+
 
 def handle_client(clientsocket, address, file_locator, file_sizes, available_files):
     global available_files_lock
@@ -215,14 +215,20 @@ def print_menu():
     print("---------------------------------------------------------------------------")
 
 
+
 if __name__ == "__main__":
-    choice = input("Press 1 to run as server, Press 2 to run as client: ")
-
-    if choice == "1":
-        run_server()
-    elif choice == "2":
-        run_client()
-    else:
-        print("Invalid choice. Please choose 1 or 2.")
-
-
+    try:
+        choice = input("Press 1 to run as server, Press 2 to run as client: ")
+        available_files_lock = threading.Lock()
+        if choice == "1":
+            run_server()
+        elif choice == "2":
+            run_client()
+        else:
+            print("Invalid choice. Please choose 1 or 2.")
+    except KeyboardInterrupt:
+        if os.name == 'posix':  # Verifica se o sistema operacional é baseado em Unix (Linux ou macOS)
+            os.system('clear')
+        elif os.name == 'nt':  # Verifica se o sistema operacional é o Windows
+            os.system('cls')
+        print("Program interrupted. Terminal cleared.")
