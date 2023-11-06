@@ -192,8 +192,8 @@ def print_menu():
     print("---------------------------------------------------------------------------")
     print("WELCOME! CHOOSE ONE OF OUR MENU OPTIONS:")
     print("---------------------------------------------------------------------------")
-    print("2 : Ask for the files that tracker has information")
-    print("3 : Download a file of your choice")
+    print("2 : View all files that are available")
+    print("3 : Get information about a file of your choice")
     print("0 : Exit")
     print("---------------------------------------------------------------------------")
 
