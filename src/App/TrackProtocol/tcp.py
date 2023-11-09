@@ -4,7 +4,7 @@ import threading
 
 HEADERSIZE = 15
 
-def handle_client(clientsocket, address, file_locator, file_sizes, available_files):
+def handle_client(clientsocket, address, file_locator ,part_locator, file_sizes ,part_sizes, available_files):
     global available_files_lock
 
     full_msg = b''
@@ -21,11 +21,13 @@ def handle_client(clientsocket, address, file_locator, file_sizes, available_fil
         length_temp = clientsocket.recv(2)
         list_length = int.from_bytes(length_temp, byteorder='big')
 
+        length_parts_temp = clientsocket.recv(2)
+        list_parts_length = int.from_bytes(length_parts_temp, byteorder='big')
+
         port_temp = clientsocket.recv(2)
         port_udp = int.from_bytes(port_temp, byteorder='big')
 
         full_msg = b''
-
         while True:
             chunk = clientsocket.recv(16)
             if not chunk:
@@ -33,10 +35,16 @@ def handle_client(clientsocket, address, file_locator, file_sizes, available_fil
             full_msg += chunk
 
         files_data = full_msg.decode("utf-8").split('|')
-        print("here")
+
+        files_data = files_data[:list_length]
+        parts_data = files_data[list_length:]
+
+        print(files_data)
+        print(parts_data)
+
         # Adicionar arquivos e tamanhos ao dicionário file_sizes
-        for file_data in files_data:
-            file, size = file_data.split(',')
+        for file in files_data:
+            file, size = file.split(',')
             file_sizes[file] = int(size)
 
         # Adicionar arquivos ao dicionário file_locator
@@ -45,6 +53,16 @@ def handle_client(clientsocket, address, file_locator, file_sizes, available_fil
                 file_locator[file] = set([address[0]])
             else:
                 file_locator[file].add(address[0])
+
+        for i in range(0, len(parts_data), 2):
+            part = parts_data[i]
+            size = parts_data[i + 1]
+            if part not in part_sizes:
+                part_sizes[part] = int(size)
+            if part not in part_locator:
+                part_locator[part] = set([address[0]])
+            else:
+                part_locator[part].add(address[0])
 
         # Atualizar a lista de arquivos disponíveis
         available_files_lock.acquire()
@@ -55,6 +73,8 @@ def handle_client(clientsocket, address, file_locator, file_sizes, available_fil
         print(f"File sizes: {file_sizes}")
         print(f"File locator: {file_locator}")
         print(f"Available files: {available_files}")
+        print(f"Part sizes: {part_sizes}")
+        print(f"Part locator: {part_locator}")
 
     if message_type == 2:
         available_files_str = '|'.join(available_files)
@@ -93,12 +113,14 @@ def handle_client(clientsocket, address, file_locator, file_sizes, available_fil
 
 def run_server():
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.bind((socket.gethostname(), 1111))
+    server.bind((socket.gethostname(), 1666))
     server.listen()
 
     connected_clients = []
     file_locator = {}
     file_sizes = {}
+    part_sizes = {}
+    part_locator = {}
     available_files = []
 
     while True:
@@ -107,7 +129,7 @@ def run_server():
 
         connected_clients.append(address)
 
-        client_handler = threading.Thread(target=handle_client, args=(clientsocket, address, file_locator, file_sizes, available_files))
+        client_handler = threading.Thread(target=handle_client, args=(clientsocket, address, file_locator, part_locator, file_sizes, part_sizes, available_files))
         client_handler.start()
 
 
@@ -123,7 +145,7 @@ def run_client():
         client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         client.connect((ip_address, port))
 
-        os.system('clear')  # Clear the console
+        #os.system('clear')  # Clear the console
 
         print_menu()
         message_type = int(input("Enter message type: "))
@@ -145,8 +167,7 @@ def run_client():
 def split_file(file_path, chunk_size, output_directory):
     if os.path.isfile(file_path):
         file_name, file_extension = os.path.splitext(os.path.basename(file_path))
-        parent_directory = os.path.dirname(os.path.dirname(output_directory))  # Alteração feita aqui
-        file_parts_directory = os.path.join(parent_directory, f"{file_name}_parts")  # Caminho de saída modificado
+        file_parts_directory = os.path.join(output_directory, f"{file_name}_parts")  # Caminho de saída modificado
         if not os.path.exists(file_parts_directory):
             os.makedirs(file_parts_directory)
             with open(file_path, 'rb') as file:
@@ -173,21 +194,37 @@ def type_1(client, directory, port):
     files_list = [file for file in os.listdir(directory) if not file.startswith('.')]
     files_list.sort()
 
+    files_parts_list = []
+
     for file in files_list:
-        file_directory = os.path.join(directory, f"{os.path.splitext(file)[0]}_parts")
+        file_name, _ = os.path.splitext(file)
+        file_directory = os.path.dirname(directory)
         split_file(os.path.join(directory, file), 10, file_directory)
+        file_parts_directory = os.path.join(file_directory, f"{file_name}_parts")
+        file_parts = os.listdir(file_parts_directory)
+        files_parts_list.extend(
+            [(part, os.path.getsize(os.path.join(file_parts_directory, part))) for part in file_parts])
+
+    files_parts_list.sort()
 
     length = len(files_list)
+    length_parts = len(files_parts_list)
 
     message_type_bytes = message_type.to_bytes(1, byteorder='big')
     length_bytes = length.to_bytes(2, byteorder='big')
+    length_parts_bytes = length_parts.to_bytes(2, byteorder='big')
+
     port_bytes = port.to_bytes(2, byteorder='big')
+
+    files_parts_data = [f"{file},{size}" for file, size in files_parts_list]
+    files_parts_list_str = '|'.join(files_parts_data)
+    files_parts_list_bytes = files_parts_list_str.encode("utf-8")
 
     files_data = [f"{file},{os.path.getsize(os.path.join(directory, file))}" for file in files_list]
     files_list_str = '|'.join(files_data)
     files_list_bytes = files_list_str.encode("utf-8")
 
-    packet = message_type_bytes + length_bytes + port_bytes + files_list_bytes
+    packet = message_type_bytes + length_bytes + length_parts_bytes + port_bytes + files_list_bytes + files_parts_list_bytes
 
     client.send(packet)
 
@@ -257,3 +294,4 @@ if __name__ == "__main__":
         elif os.name == 'nt':  # Verifica se o sistema operacional é o Windows
             os.system('cls')
         print("Program interrupted. Terminal cleared.")
+
