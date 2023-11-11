@@ -4,7 +4,7 @@ import threading
 
 HEADERSIZE = 15
 
-def handle_client(clientsocket, address, file_locator ,part_locator, file_sizes ,part_sizes, available_files):
+def handle_client(clientsocket, address, file_locator, part_locator, file_sizes, part_sizes, available_files):
     global available_files_lock
 
     full_msg = b''
@@ -27,20 +27,24 @@ def handle_client(clientsocket, address, file_locator ,part_locator, file_sizes 
         port_temp = clientsocket.recv(2)
         port_udp = int.from_bytes(port_temp, byteorder='big')
 
-        full_msg = b''
+        count = 0
         while True:
-            chunk = clientsocket.recv(16)
+            count += 1
+            if count > list_length + list_parts_length:
+                break
+            chunk = clientsocket.recv(20)
             if not chunk:
                 break
             full_msg += chunk
 
-        files_data = full_msg.decode("utf-8").split('|')
+        files_and_parts_data = full_msg.decode("utf-8").split('|')
 
-        files_data = files_data[:list_length]
-        parts_data = files_data[list_length:]
+        # Split the combined data into files and file parts
+        files_data = files_and_parts_data[:list_length]
+        files_parts_data = files_and_parts_data[list_length:-1]
 
         print(files_data)
-        print(parts_data)
+        print(files_parts_data)
 
         # Adicionar arquivos e tamanhos ao dicionário file_sizes
         for file in files_data:
@@ -54,11 +58,10 @@ def handle_client(clientsocket, address, file_locator ,part_locator, file_sizes 
             else:
                 file_locator[file].add(address[0])
 
-        for i in range(0, len(parts_data), 2):
-            part = parts_data[i]
-            size = parts_data[i + 1]
-            if part not in part_sizes:
-                part_sizes[part] = int(size)
+        # Adicionar partes e tamanhos aos dicionários part_sizes e part_locator
+        for item in files_parts_data:
+            part, size = item.split(',')
+            part_sizes[part] = int(size)
             if part not in part_locator:
                 part_locator[part] = set([address[0]])
             else:
@@ -207,6 +210,10 @@ def type_1(client, directory, port):
 
     files_parts_list.sort()
 
+    # Delimiters added here
+    files_list_str = '|'.join([f"{file},{os.path.getsize(os.path.join(directory, file))}" for file in files_list]) + '|'
+    files_parts_list_str = '|'.join([f"{file},{size}" for file, size in files_parts_list]) + '|'
+
     length = len(files_list)
     length_parts = len(files_parts_list)
 
@@ -216,16 +223,13 @@ def type_1(client, directory, port):
 
     port_bytes = port.to_bytes(2, byteorder='big')
 
-    files_parts_data = [f"{file},{size}" for file, size in files_parts_list]
-    files_parts_list_str = '|'.join(files_parts_data)
+    # Modified packets with delimiters
+    files_list_bytes = files_list_str.encode("utf-8")
     files_parts_list_bytes = files_parts_list_str.encode("utf-8")
 
-    files_data = [f"{file},{os.path.getsize(os.path.join(directory, file))}" for file in files_list]
-    files_list_str = '|'.join(files_data)
-    files_list_bytes = files_list_str.encode("utf-8")
-
     packet = message_type_bytes + length_bytes + length_parts_bytes + port_bytes + files_list_bytes + files_parts_list_bytes
-
+    print(length_parts_bytes)
+    print(length_bytes)
     client.send(packet)
 
 
