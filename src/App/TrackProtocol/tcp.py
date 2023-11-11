@@ -1,11 +1,11 @@
 import socket
 import os
+import sys
 import threading
 
 HEADERSIZE = 15
-
-def handle_client(clientsocket, address, file_locator, part_locator, file_sizes, part_sizes, available_files):
-    global available_files_lock
+global lock
+def handle_client(clientsocket, address, files_info, files_parts_info, available_files):
 
     full_msg = b''
 
@@ -17,6 +17,8 @@ def handle_client(clientsocket, address, file_locator, part_locator, file_sizes,
 
     if message_type == 1:
 
+        lock.acquire()
+
         # Adicionar tamanho dos ficheiros
         length_temp = clientsocket.recv(2)
         list_length = int.from_bytes(length_temp, byteorder='big')
@@ -27,11 +29,8 @@ def handle_client(clientsocket, address, file_locator, part_locator, file_sizes,
         port_temp = clientsocket.recv(2)
         port_udp = int.from_bytes(port_temp, byteorder='big')
 
-        count = 0
+
         while True:
-            count += 1
-            if count > list_length + list_parts_length:
-                break
             chunk = clientsocket.recv(20)
             if not chunk:
                 break
@@ -43,41 +42,33 @@ def handle_client(clientsocket, address, file_locator, part_locator, file_sizes,
         files_data = files_and_parts_data[:list_length]
         files_parts_data = files_and_parts_data[list_length:-1]
 
-        print(files_data)
-        print(files_parts_data)
-
-        # Adicionar arquivos e tamanhos ao dicionário file_sizes
+        # Adicionar arquivos e informações ao dicionário files_info
         for file in files_data:
             file, size = file.split(',')
-            file_sizes[file] = int(size)
+            file_name, _ = file.split('.')
+            num_parts = sum(1 for part in files_parts_data if part.startswith(file_name))
+            ip = address[0]
+            files_info[file] = (int(size), num_parts, ip)
 
-        # Adicionar arquivos ao dicionário file_locator
-        for file in file_sizes:
-            if file not in file_locator:
-                file_locator[file] = set([address[0]])
-            else:
-                file_locator[file].add(address[0])
 
-        # Adicionar partes e tamanhos aos dicionários part_sizes e part_locator
+        # Adicionar partes e informações ao dicionário files_parts_info
         for item in files_parts_data:
             part, size = item.split(',')
-            part_sizes[part] = int(size)
-            if part not in part_locator:
-                part_locator[part] = set([address[0]])
-            else:
-                part_locator[part].add(address[0])
+            file_name, _ = part.split('_part')
+            ip = address[0]
+            files_parts_info[part] = (int(size), ip)
 
-        # Atualizar a lista de arquivos disponíveis
-        available_files_lock.acquire()
-        available_files.clear()
-        available_files.extend(file_sizes.keys())
-        available_files_lock.release()
+        # Adicionar nomes de arquivos ao conjunto available_files
+        for file_data in files_data:
+            file_name, _ = file_data.split(',')
+            available_files.add(file_name)
 
-        print(f"File sizes: {file_sizes}")
-        print(f"File locator: {file_locator}")
         print(f"Available files: {available_files}")
-        print(f"Part sizes: {part_sizes}")
-        print(f"Part locator: {part_locator}")
+        print(f"Files Info: {files_info}")
+        print(f"Files Parts Info: {files_parts_info}")
+
+
+        lock.release()
 
     if message_type == 2:
         available_files_str = '|'.join(available_files)
@@ -95,18 +86,18 @@ def handle_client(clientsocket, address, file_locator, part_locator, file_sizes,
 
         file_request = clientsocket.recv(file_length).decode("utf-8")
 
-        if file_request in file_locator:
-            file_location = ', '.join(file_locator[file_request])
-            file_location_bytes = file_location.encode("utf-8")
-            length = len(file_location_bytes)
-
-            length_bytes = length.to_bytes(2, byteorder='big')
-
-            packet = length_bytes + file_location_bytes
-
-            clientsocket.sendall(packet)
-        else:
-            clientsocket.send("File not found".encode("utf-8"))
+        # if file_request in file_locator:
+        #     file_location = ', '.join(file_locator[file_request])
+        #     file_location_bytes = file_location.encode("utf-8")
+        #     length = len(file_location_bytes)
+        #
+        #     length_bytes = length.to_bytes(2, byteorder='big')
+        #
+        #     packet = length_bytes + file_location_bytes
+        #
+        #     clientsocket.sendall(packet)
+        # else:
+        #     clientsocket.send("File not found".encode("utf-8"))
 
     clientsocket.close()
 
@@ -120,11 +111,9 @@ def run_server():
     server.listen()
 
     connected_clients = []
-    file_locator = {}
-    file_sizes = {}
-    part_sizes = {}
-    part_locator = {}
-    available_files = []
+    files_parts_info = {}
+    files_info = {}
+    available_files = set()
 
     while True:
         clientsocket, address = server.accept()
@@ -132,7 +121,7 @@ def run_server():
 
         connected_clients.append(address)
 
-        client_handler = threading.Thread(target=handle_client, args=(clientsocket, address, file_locator, part_locator, file_sizes, part_sizes, available_files))
+        client_handler = threading.Thread(target=handle_client, args=(clientsocket, address, files_info, files_parts_info, available_files))
         client_handler.start()
 
 
@@ -177,6 +166,8 @@ def split_file(file_path, chunk_size, output_directory):
                 index = 1
                 while True:
                     data = file.read(chunk_size)
+                    # if index==1 and  len(data) < 10:
+                    #     break
                     if not data:
                         break
                     part_file_name = f"{file_name}_part{index}{file_extension}"
@@ -245,11 +236,11 @@ def type_2(client):
     length_bytes = client.recv(2)
     length = int.from_bytes(length_bytes, byteorder='big')
 
-    available_files_lock.acquire()
+    lock.acquire()
     available_files_bytes = client.recv(length)
     available_files_str = available_files_bytes.decode("utf-8")
     available_files = available_files_str.split('|')
-    available_files_lock.release()
+    lock.release()
 
     print("\n----------------------------------------------------------------")
     print(f"Available files: {available_files}")
@@ -285,7 +276,7 @@ def print_menu():
 if __name__ == "__main__":
     try:
         choice = input("Press 1 to run as server, Press 2 to run as client: ")
-        available_files_lock = threading.Lock()
+        lock = threading.Lock()
         if choice == "1":
             run_server()
         elif choice == "2":
