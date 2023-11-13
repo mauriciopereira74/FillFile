@@ -2,6 +2,7 @@ import socket
 import os
 import sys
 import threading
+import json
 
 HEADERSIZE = 15
 global lock
@@ -59,9 +60,10 @@ def handle_client(clientsocket, address, files_info, files_parts_info, available
             files_parts_info[part] = (int(size), ip)
 
         # Adicionar nomes de arquivos ao conjunto available_files
-        for file_data in files_data:
-            file_name, _ = file_data.split(',')
+        for file in files_data:
+            file_name, _ = file.split(',')
             available_files.add(file_name)
+
 
         print(f"Available files: {available_files}")
         print(f"Files Info: {files_info}")
@@ -86,23 +88,44 @@ def handle_client(clientsocket, address, files_info, files_parts_info, available
 
         file_request = clientsocket.recv(file_length).decode("utf-8")
 
-        # if file_request in file_locator:
-        #     file_location = ', '.join(file_locator[file_request])
-        #     file_location_bytes = file_location.encode("utf-8")
-        #     length = len(file_location_bytes)
-        #
-        #     length_bytes = length.to_bytes(2, byteorder='big')
-        #
-        #     packet = length_bytes + file_location_bytes
-        #
-        #     clientsocket.sendall(packet)
-        # else:
-        #     clientsocket.send("File not found".encode("utf-8"))
+        response_data = json.dumps(files_info)
 
-    clientsocket.close()
+        # Obtendo o tamanho da resposta
+        response_length = len(response_data)
+        response_length_bytes = response_length.to_bytes(2, byteorder='big')
 
-# Restante do código permanece o mesmo
+        # Enviando o tamanho da resposta e a resposta ao cliente em um só pacote
+        clientsocket.sendall(response_length_bytes + response_data.encode("utf-8"))
 
+    if message_type == 4:
+        file_length = clientsocket.recv(2)
+        file_length = int.from_bytes(file_length, byteorder='big')
+
+        file_request = clientsocket.recv(file_length).decode("utf-8")
+
+        file_request,_ = file_request.split('.')
+
+        # Verificar se o arquivo está presente no dicionário files_parts_info
+        if file_request in files_parts_info:
+            # Obter informações sobre as partes do arquivo
+            parts_info = [(part, files_parts_info[part][1]) for part in files_parts_info if
+                          part.startswith(file_request)]
+
+            # Criar uma lista de strings com a informação de cada parte
+            parts_info_str_list = [f"{part}: {ip}" for part, ip in parts_info]
+
+            # Unir a lista em uma única string com delimitador '|'
+            parts_info_str = '|'.join(parts_info_str_list)
+
+            # Enviar o tamanho da resposta e a lista de partes ao cliente em um só pacote
+            response_length = len(parts_info_str)
+            response_length_bytes = response_length.to_bytes(2, byteorder='big')
+
+            clientsocket.sendall(response_length_bytes + parts_info_str.encode("utf-8"))
+        else:
+            # Se o arquivo não for encontrado, enviar uma resposta indicando isso
+            response_length_bytes = (len("File not found").to_bytes(2, byteorder='big'))
+            clientsocket.sendall(response_length_bytes + "File not found".encode("utf-8"))
 
 
 def run_server():
@@ -145,11 +168,13 @@ def run_client():
         if message_type == 2:
             type_2(client)
         if message_type == 3:
-            type_3(client)
+            type_3(client,None)
+        if message_type == 4:
+            type_4(client)
         if message_type == 0:
             break
 
-        if message_type != 0 and message_type != 2 and message_type != 3:
+        if message_type != 0 and message_type != 2 and message_type != 3 and message_type != 4:
             print("\nInvalid Option....\n")
 
 
@@ -246,10 +271,50 @@ def type_2(client):
     print(f"Available files: {available_files}")
     print("------------------------------------------------------------------\n")
 
-def type_3(client):
+def type_3(client,file_request):
     message_type = 3
+    temp=0
 
-    file_request = input("Enter the file you want to get information about: ")
+
+    if not file_request:
+
+        file_request = input("Enter the file you want to get information about: ")
+
+
+    file_lenght = len(file_request)
+    file_lenght_bytes = file_lenght.to_bytes(2, byteorder='big')
+
+
+    message_type_bytes = message_type.to_bytes(1, byteorder='big')
+
+    packet = message_type_bytes + file_lenght_bytes + file_request.encode("utf-8")
+    client.send(packet)
+
+    response_length_bytes = client.recv(2)
+    response_length = int.from_bytes(response_length_bytes, byteorder='big')
+
+    # Recebendo a resposta do servidor
+    received_data = client.recv(response_length)
+
+    # Decodificando a string JSON para um dicionário
+    response_data = json.loads(received_data.decode("utf-8"))
+
+    if response_data.get(file_request):
+        # Extraindo informações do dicionário de resposta
+        file_size, num_parts, ip = response_data[file_request]
+
+        # Imprimindo informações formatadas
+        print(f"File Information: {file_request}\nSize: {file_size} bytes\nNumber of Parts: {num_parts}\nLocations: {ip}")
+    else:
+        print("File not found")
+
+
+def type_4(client):
+
+    file_request = input("Enter the file name to Download: ")
+
+    message_type = 4
+
     file_lenght = len(file_request)
     file_lenght_bytes = file_lenght.to_bytes(2, byteorder='big')
     message_type_bytes = message_type.to_bytes(1, byteorder='big')
@@ -257,9 +322,24 @@ def type_3(client):
     packet = message_type_bytes + file_lenght_bytes + file_request.encode("utf-8")
     client.send(packet)
 
+    response_length_bytes = client.recv(2)
+    response_length = int.from_bytes(response_length_bytes, byteorder='big')
+
     # Receber a resposta do servidor
-    response = client.recv(1024).decode("utf-8")
-    print(f"Server's response: {response}")
+    received_data = client.recv(response_length)
+    response_data = received_data.decode("utf-8")
+
+    # Se a resposta indicar que o arquivo não foi encontrado, imprimir a mensagem
+    if response_data == "File not found":
+        print("File not found")
+    else:
+        # Se a resposta contiver a lista de partes, imprimir as informações
+        parts_info_list = response_data.split('|')
+        for part_info in parts_info_list:
+            print(part_info)
+
+
+
 
 
 def print_menu():
@@ -268,6 +348,7 @@ def print_menu():
     print("---------------------------------------------------------------------------")
     print("2 : View all files that are available")
     print("3 : Get information about a file of your choice")
+    print("4 : Download a file of your choice")
     print("0 : Exit")
     print("---------------------------------------------------------------------------")
 
