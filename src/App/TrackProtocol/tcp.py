@@ -49,7 +49,7 @@ def handle_client(clientsocket, address, files_info, files_parts_info, available
             file_name, _ = file.split('.')
             num_parts = sum(1 for part in files_parts_data if part.startswith(file_name))
             ip = address[0]
-            files_info[file] = (int(size), num_parts, ip)
+            files_info[file] = (int(size), num_parts, ip,port_udp)
 
 
         # Adicionar partes e informações ao dicionário files_parts_info
@@ -57,7 +57,7 @@ def handle_client(clientsocket, address, files_info, files_parts_info, available
             part, size = item.split(',')
             file_name, _ = part.split('_part')
             ip = address[0]
-            files_parts_info[part] = (int(size), ip)
+            files_parts_info[part] = (int(size), ip,port_udp)
 
         # Adicionar nomes de arquivos ao conjunto available_files
         for file in files_data:
@@ -103,16 +103,18 @@ def handle_client(clientsocket, address, files_info, files_parts_info, available
 
         file_request = clientsocket.recv(file_length).decode("utf-8")
 
-        file_request,_ = file_request.split('.')
+        file_request, _ = file_request.split(".")
 
         # Verificar se o arquivo está presente no dicionário files_parts_info
-        if file_request in files_parts_info:
+        matching_parts = [part for part in files_parts_info if part.startswith(file_request)]
+
+        if matching_parts:
             # Obter informações sobre as partes do arquivo
-            parts_info = [(part, files_parts_info[part][1]) for part in files_parts_info if
-                          part.startswith(file_request)]
+            parts_info = [(part, files_parts_info[part][1], files_parts_info[part][0], files_parts_info[part][2]) for
+                          part in matching_parts]
 
             # Criar uma lista de strings com a informação de cada parte
-            parts_info_str_list = [f"{part}: {ip}" for part, ip in parts_info]
+            parts_info_str_list = [f"{part}:{size}:{ip}:{udp_port}" for part, ip, size, udp_port in parts_info]
 
             # Unir a lista em uma única string com delimitador '|'
             parts_info_str = '|'.join(parts_info_str_list)
@@ -121,11 +123,21 @@ def handle_client(clientsocket, address, files_info, files_parts_info, available
             response_length = len(parts_info_str)
             response_length_bytes = response_length.to_bytes(2, byteorder='big')
 
-            clientsocket.sendall(response_length_bytes + parts_info_str.encode("utf-8"))
+            # Adicionar informações do arquivo ao pacote
+            packet = response_length_bytes + parts_info_str.encode("utf-8")
+
+            # Enviar o pacote
+            clientsocket.send(packet)
         else:
-            # Se o arquivo não for encontrado, enviar uma resposta indicando isso
-            response_length_bytes = (len("File not found").to_bytes(2, byteorder='big'))
-            clientsocket.sendall(response_length_bytes + "File not found".encode("utf-8"))
+            # Se o arquivo solicitado não estiver presente, envie uma resposta indicando isso
+            error_message = "File not available"
+            error_message_bytes = error_message.encode("utf-8")
+            length = len(error_message_bytes)
+
+            length_bytes = length.to_bytes(2, byteorder='big')
+            packet = length_bytes + error_message_bytes
+
+            clientsocket.send(packet)
 
 
 def run_server():
@@ -199,13 +211,6 @@ def split_file(file_path, chunk_size, output_directory):
                     with open(os.path.join(file_parts_directory, part_file_name), 'wb') as part_file:
                         part_file.write(data)
                     index += 1
-        else:
-            print(f"Directory {file_parts_directory} already exists. Skipping creation.")
-    else:
-        print(f"The provided path '{file_path}' does not point to a file.")
-
-
-
 
 def type_1(client, directory, port):
     message_type = 1
@@ -237,15 +242,15 @@ def type_1(client, directory, port):
     length_bytes = length.to_bytes(2, byteorder='big')
     length_parts_bytes = length_parts.to_bytes(2, byteorder='big')
 
-    port_bytes = port.to_bytes(2, byteorder='big')
+    port_udp = 2000
+    port_bytes = port_udp.to_bytes(2, byteorder='big')
 
     # Modified packets with delimiters
     files_list_bytes = files_list_str.encode("utf-8")
     files_parts_list_bytes = files_parts_list_str.encode("utf-8")
 
     packet = message_type_bytes + length_bytes + length_parts_bytes + port_bytes + files_list_bytes + files_parts_list_bytes
-    print(length_parts_bytes)
-    print(length_bytes)
+
     client.send(packet)
 
 
@@ -273,8 +278,6 @@ def type_2(client):
 
 def type_3(client,file_request):
     message_type = 3
-    temp=0
-
 
     if not file_request:
 
@@ -330,16 +333,14 @@ def type_4(client):
     response_data = received_data.decode("utf-8")
 
     # Se a resposta indicar que o arquivo não foi encontrado, imprimir a mensagem
-    if response_data == "File not found":
+    if response_data == "File not available":
         print("File not found")
     else:
         # Se a resposta contiver a lista de partes, imprimir as informações
         parts_info_list = response_data.split('|')
-        for part_info in parts_info_list:
-            print(part_info)
-
-
-
+        for part in parts_info_list:
+            part_name, size, ip, udp_port = part.split(':')
+            pass
 
 
 def print_menu():
