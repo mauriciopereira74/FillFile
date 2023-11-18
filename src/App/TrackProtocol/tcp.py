@@ -6,8 +6,9 @@ import json
 
 HEADERSIZE = 15
 global lock
-def handle_client(clientsocket, address, files_info, files_parts_info, available_files):
 
+
+def handle_client(clientsocket, address, files_info, files_parts_info, available_files):
     full_msg = b''
 
     # Read exactly 1 byte for the message_type
@@ -30,7 +31,6 @@ def handle_client(clientsocket, address, files_info, files_parts_info, available
         port_temp = clientsocket.recv(2)
         port_udp = int.from_bytes(port_temp, byteorder='big')
 
-
         while True:
             chunk = clientsocket.recv(20)
             if not chunk:
@@ -49,26 +49,23 @@ def handle_client(clientsocket, address, files_info, files_parts_info, available
             file_name, _ = file.split('.')
             num_parts = sum(1 for part in files_parts_data if part.startswith(file_name))
             ip = address[0]
-            files_info[file] = (int(size), num_parts, ip,port_udp)
-
+            files_info[file] = (int(size), num_parts, ip, port_udp)
 
         # Adicionar partes e informações ao dicionário files_parts_info
         for item in files_parts_data:
             part, size = item.split(',')
             file_name, _ = part.split('_part')
             ip = address[0]
-            files_parts_info[part] = (int(size), ip,port_udp)
+            files_parts_info[part] = (int(size), ip, port_udp)
 
         # Adicionar nomes de arquivos ao conjunto available_files
         for file in files_data:
             file_name, _ = file.split(',')
             available_files.add(file_name)
 
-
         print(f"Available files: {available_files}")
         print(f"Files Info: {files_info}")
         print(f"Files Parts Info: {files_parts_info}")
-
 
         lock.release()
 
@@ -140,9 +137,10 @@ def handle_client(clientsocket, address, files_info, files_parts_info, available
             clientsocket.send(packet)
 
 
-def run_server():
+def run_server(ip_adress, port):
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.bind((socket.gethostname(), 1666))
+
+    server.bind((ip_adress, int(port)))
     server.listen()
 
     connected_clients = []
@@ -155,24 +153,22 @@ def run_server():
         print(f"Connected to {address}")
 
         connected_clients.append(address)
-
-        client_handler = threading.Thread(target=handle_client, args=(clientsocket, address, files_info, files_parts_info, available_files))
+        client_handler = threading.Thread(target=handle_client,
+                                          args=(clientsocket, address, files_info, files_parts_info, available_files))
         client_handler.start()
 
 
-def run_client():
-    ip_address, port, directory = input("Enter [ip address] [port] [directory]: ").split()
-    port = int(port)
+def run_client(ip_address, port, directory):
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client.connect((ip_address, port))
+    client.connect((ip_address, int(port)))
     type_1(client, directory, port)
     client.close()
 
     while True:
         client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        client.connect((ip_address, port))
+        client.connect((ip_address, int(port)))
 
-        #os.system('clear')  # Clear the console
+        # os.system('clear')  # Clear the console
 
         print_menu()
         message_type = int(input("Enter message type: "))
@@ -180,7 +176,7 @@ def run_client():
         if message_type == 2:
             type_2(client)
         if message_type == 3:
-            type_3(client,None)
+            type_3(client, None)
         if message_type == 4:
             type_4(client)
         if message_type == 0:
@@ -188,7 +184,6 @@ def run_client():
 
         if message_type != 0 and message_type != 2 and message_type != 3 and message_type != 4:
             print("\nInvalid Option....\n")
-
 
         input("Press Enter to continue...")
 
@@ -211,6 +206,7 @@ def split_file(file_path, chunk_size, output_directory):
                     with open(os.path.join(file_parts_directory, part_file_name), 'wb') as part_file:
                         part_file.write(data)
                     index += 1
+
 
 def type_1(client, directory, port):
     message_type = 1
@@ -276,17 +272,15 @@ def type_2(client):
     print(f"Available files: {available_files}")
     print("------------------------------------------------------------------\n")
 
-def type_3(client,file_request):
+
+def type_3(client, file_request):
     message_type = 3
 
     if not file_request:
-
         file_request = input("Enter the file you want to get information about: ")
-
 
     file_lenght = len(file_request)
     file_lenght_bytes = file_lenght.to_bytes(2, byteorder='big')
-
 
     message_type_bytes = message_type.to_bytes(1, byteorder='big')
 
@@ -307,13 +301,13 @@ def type_3(client,file_request):
         file_size, num_parts, ip = response_data[file_request]
 
         # Imprimindo informações formatadas
-        print(f"File Information: {file_request}\nSize: {file_size} bytes\nNumber of Parts: {num_parts}\nLocations: {ip}")
+        print(
+            f"File Information: {file_request}\nSize: {file_size} bytes\nNumber of Parts: {num_parts}\nLocations: {ip}")
     else:
         print("File not found")
 
 
 def type_4(client):
-
     file_request = input("Enter the file name to Download: ")
 
     message_type = 4
@@ -354,21 +348,44 @@ def print_menu():
     print("---------------------------------------------------------------------------")
 
 
+def print_usage():
+    print("---------------------------------------------------------------------------")
+    print("INVALID ARGUMENTS")
+    print("USAGE...")
+    print("---------------------------------------------------------------------------")
+    print("Run as a server: 1 [ip adress] [port]")
+    print("---------------------------------------------------------------------------")
+    print("Run as a client: 2 [ip adress (server)] [port] [directory]")
+    print("---------------------------------------------------------------------------")
 
-if __name__ == "__main__":
+
+def main():
     try:
-        choice = input("Press 1 to run as server, Press 2 to run as client: ")
-        lock = threading.Lock()
-        if choice == "1":
-            run_server()
-        elif choice == "2":
-            run_client()
+        # Check if the script is run as a server or a client
+        if (sys.argv[1] == "help"):
+            print_usage()
+
+        if len(sys.argv) == 4 and sys.argv[1] == '1':
+            # Run the server with the specified IP address
+            run_server(sys.argv[2], sys.argv[3])
+
+
+        elif len(sys.argv) == 5 and sys.argv[1] == '2':
+
+            run_client(sys.argv[2], sys.argv[3], sys.argv[4])
+
         else:
-            print("Invalid choice. Please choose 1 or 2.")
+            print_usage()
+
     except KeyboardInterrupt:
-        if os.name == 'posix':  # Verifica se o sistema operacional é baseado em Unix (Linux ou macOS)
+        if os.name == 'posix':
             os.system('clear')
-        elif os.name == 'nt':  # Verifica se o sistema operacional é o Windows
+        elif os.name == 'nt':
             os.system('cls')
         print("Program interrupted. Terminal cleared.")
 
+
+# Rest of your code (handle_client, run_server, run_client, etc.)
+
+if __name__ == "__main__":
+    main()
