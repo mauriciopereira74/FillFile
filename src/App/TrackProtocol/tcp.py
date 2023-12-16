@@ -5,9 +5,9 @@ import threading
 import json
 import queue
 import random
-import math
 import time
 from tkinter import Tk, Label, Button, Frame, Text, Scrollbar, Entry, END
+from time import sleep
 
 PARTSIZE = 64000
 global download_lock
@@ -72,7 +72,7 @@ def handle_client(clientsocket, address, files_info, files_parts_info, available
             files_data = msg.decode("utf-8").split('|')
             files_data = list(filter(None, files_data))
 
-            print(files_data)
+            
 
             # Adicionar arquivos e informações ao dicionário files_info
             # Inicialize uma lista vazia para armazenar os IPs
@@ -143,9 +143,9 @@ def handle_client(clientsocket, address, files_info, files_parts_info, available
                         file_name, _ = file.split(',')
                         available_files.add(file_name)
 
-                print(f"Available files: {available_files}")
-                print(f"Files Info: {files_info}")
-                print(f"Files Parts Info: {files_parts_info}")
+                #print(f"Available files: {available_files}")
+                #print(f"Files Info: {files_info}")
+                #print(f"Files Parts Info: {files_parts_info}")
 
 
         elif message_type == 2:
@@ -198,21 +198,18 @@ def handle_client(clientsocket, address, files_info, files_parts_info, available
                               part in matching_parts]
 
                 # Criar uma lista de strings com a informação de cada parte
-                parts_info_str_list = [f"{part}:{size}:{ip}:{udp_port}" for part, ip, size, udp_port in parts_info]
+                parts_info_str_list = [f"{ip}" for part, ip, size, udp_port in parts_info]
 
                 # Unir a lista em uma única string com delimitador '|'
                 parts_info_str = '|'.join(parts_info_str_list)
 
                 # Enviar o tamanho da resposta e a lista de partes ao cliente em um só pacote
                 response_length = len(parts_info_str)
+                print(f"\n\n\n{response_length}\n\n\n")
                 response_length_bytes = response_length.to_bytes(3, byteorder='big')
 
-                ip_bytes = address[0].encode('utf-8')
-                ip_size = len(ip_bytes).to_bytes(2, byteorder='big')
-
                 # Adicionar informações do arquivo ao pacote
-                packet = response_length_bytes + ip_size + parts_info_str.encode("utf-8") + ip_bytes
-
+                packet = response_length_bytes + parts_info_str.encode("utf-8") 
                 # Enviar o pacote
                 clientsocket.send(packet)
             else:
@@ -258,10 +255,6 @@ def handle_client(clientsocket, address, files_info, files_parts_info, available
                     1 for part in files_parts_info if part.startswith(file_name) and ip in files_parts_info[part][1])
                 if client_parts_count >= num_parts_expected:
 
-                    confirmation = 1
-                    confirmation = confirmation.to_bytes(1, byteorder='big')
-                    clientsocket.send(confirmation)
-
                     with files_lock:
                         if file_name_dot in files_info:
                             size, _, ips_list, udp_port = files_info[file_name_dot]
@@ -270,8 +263,11 @@ def handle_client(clientsocket, address, files_info, files_parts_info, available
                                 ips_list.append(ip)
                             files_info[file_name_dot] = (size, num_parts_expected, tuple(ips_list), udp_port)
 
-                    print(files_info)
-                    print(files_parts_info)
+                    #print(files_info)
+                    #print(files_parts_info)
+                    
+                    #_ = clientsocket.recv(1024)
+                    
 
 
 def run_server(server_name, port):
@@ -358,7 +354,7 @@ def udp_sender(udp_socket, udp_receive_socket, directory):
                 # Envio do arquivo por UDP
                 udp_socket.sendto(packet, (ip, int(port) - 1))
 
-                print(f"Sent part {part_name} to {ip_address}")
+                #print(f"Sent part {part_name} to {ip_address}")
         except FileNotFoundError:
             print(f"Error: File {part_name} not found")
 
@@ -368,6 +364,7 @@ def run_client(server_name, port, directory):
     os.environ['DISPLAY'] = ':0.0'
     
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    #fcntl.fcntl(client, fcntl.F_SETFL, os.O_NONBLOCK)
     
     ip_address= socket.gethostbyname(server_name)
     
@@ -419,7 +416,7 @@ def run_client(server_name, port, directory):
         type_3(client, file_request, text_area)
 
     def download_file():
-        type_4(client, udp_socket, udp_receive_socket, directory, ip_address, int(port))
+        type_4(client, udp_socket, udp_receive_socket, directory, udp_port)
 
     def exit_program():
         type_0(client)
@@ -635,9 +632,9 @@ def type_3(client, file_request, text_area):
 
 
 
-def type_4(client, udp_socket, udp_receive_socket, directory, ip_address, port):
+def type_4(client, udp_socket, udp_receive_socket, directory, udp_port):
     file_request = input("Enter the file name to Download: ")
-
+    
     message_type = 4
     file_length = len(file_request)
     file_length_bytes = file_length.to_bytes(2, byteorder='big')
@@ -650,15 +647,12 @@ def type_4(client, udp_socket, udp_receive_socket, directory, ip_address, port):
     response_length_bytes = client.recv(3)
     response_length = int.from_bytes(response_length_bytes, byteorder='big')
 
-    ip_length_bytes = client.recv(2)
-    ip_length = int.from_bytes(ip_length_bytes, byteorder='big')
-
+    print(f"\n\n\n{response_length}\n\n\n")
     # Receber a resposta do servidor
     received_data = client.recv(response_length)
     response_data = received_data.decode("utf-8")
-    print(f"\n\nRECEVVID\n{received_data}\n")
-    received_ip = client.recv(response_length)
-    response_ip = received_ip.decode("utf-8")
+    
+    print(f"\n\nRECEVVID\n{response_data}\n")
 
     i = 0
     len_aux = 0
@@ -669,49 +663,53 @@ def type_4(client, udp_socket, udp_receive_socket, directory, ip_address, port):
     else:
         parts_info_list = response_data.split('|')
         # Iterar sobre as partes e enviar mensagens UDP para cada cliente
-
+        h=0
+        part,dot = file_request.split('.')
+                    
         for part_info in parts_info_list:
-
-            part_name, _, ip_list, udp_port = part_info.split(':')
+            ip_list = eval(part_info)
+            part_name = f"{part}_part{h + 1}.{dot}"
+            h +=1
 
             udp_message_type = 1
             udp_message_type_bytes = udp_message_type.to_bytes(1, byteorder='big')
             part_name_bytes = part_name.encode("utf-8")
 
             packet = udp_message_type_bytes + part_name_bytes
-            ip_list = eval(ip_list)
+            
             if i == 0:
                 len_aux = len(ip_list)
 
             index_ip = random.randint(0, len_aux - 1)
 
             ip = ip_list[index_ip]
-
             key = part_name
             value = (ip_list, index_ip, 0)
-            print(key)
+            #print(key)
             with download_lock:
                 download_dict[key] = value
             i = i + 1
+            
 
             # Enviar mensagem UDP para o cliente específico
-            udp_receive_socket.sendto(packet, (ip, int(udp_port) + 1))
-            print(f"Sent UDP request for part {part_name} to {ip}:{udp_port}")
+            udp_receive_socket.sendto(packet, (ip, udp_port + 1))
+            #print(f"Sent UDP request for part {part_name} to {ip}:{udp_port}")
+            
 
             # Adicionar o download da parte ao download_dict
 
     control_download = 1
     tamanho = 0
     flag_aux = 0
-
+    q=-1
     while tamanho < i:
         with lock:
 
             reason = condition.wait(timeout=1)
 
-            if reason:
-                print(f"tamanho: {tamanho}")
-                print(f"i: {i}")
+            if reason or q==0:
+                #print(f"tamanho: {tamanho}")
+                #print(f"i: {i}")
                 tamanho = tamanho + queue_recv.qsize()
                 for t in range(queue_recv.qsize()):
                     part_name = queue_recv.get()
@@ -728,6 +726,7 @@ def type_4(client, udp_socket, udp_receive_socket, directory, ip_address, port):
                         packet = message_type_bytes + part_size_bytes + part_name_bytes
 
                         client.send(packet)
+                        q=-1
                     except Exception as e:
                         print(f"Erro ao enviar pacote: {e}")
 
@@ -743,11 +742,13 @@ def type_4(client, udp_socket, udp_receive_socket, directory, ip_address, port):
 
                     break
                 with download_lock:
+                    q=0
                     for key, values in download_dict.items():
-
+                        
                         ip_list, index_ip, flag = values
 
                         if flag == 0:
+                            q +=1
                             try:
                                 udp_message_type = 1
                                 udp_message_type_bytes = udp_message_type.to_bytes(1, byteorder='big')
@@ -775,18 +776,10 @@ def type_4(client, udp_socket, udp_receive_socket, directory, ip_address, port):
 
     if flag_aux == 0:
         concatenate_file_parts(file_request, directory)
-
-
-def print_menu():
-    print("╔════════════════════════════════════════════════════════════════════════╗")
-    print("║                   WELCOME! CHOOSE ONE OF OUR MENU OPTIONS:             ║")
-    print("╟────────────────────────────────────────────────────────────────────────╢")
-    print("║ 2 : View all files that are available                                  ║")
-    print("║ 3 : Get information about a file of your choice                        ║")
-    print("║ 4 : Download a file of your choice                                     ║")
-    print("║ 0 : Exit                                                               ║")
-    print("╚════════════════════════════════════════════════════════════════════════╝")
-
+        
+    
+            
+            
 
 
 
