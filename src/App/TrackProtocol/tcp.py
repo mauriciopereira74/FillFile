@@ -6,7 +6,7 @@ import json
 import queue
 import random
 import time
-from tkinter import Tk, Label, Button, Frame, Text, Scrollbar, Entry, END
+from tkinter import Tk, Label, Button, Frame, Text, Scrollbar, Entry, END, simpledialog
 from time import sleep
 import hashlib
 
@@ -22,39 +22,46 @@ download_dict = {}
 def handle_client(clientsocket, address, files_info, files_parts_info, available_files, files_lock):
     while True:
 
-        
         message_type_bytes = clientsocket.recv(1)
 
-        
+
         message_type = int.from_bytes(message_type_bytes, byteorder='big')
 
         if message_type == 0:
 
             print(f"Connection from {address} terminated.")
 
+            name,_,_ = socket.gethostbyaddr(address[0])
+            name,_,_ = name.split('.')
+
             
             with files_lock:
                 for file, info in list(files_info.items()):
-                    _, _, ips, _ , hash = info
-                    ips_list = list(ips)
-                    if address[0] in ips_list:
-                        ips_list.remove(address[0])
+                    size, num_parts, names, port_udp , hash = info
+                    names_list = list(names)
+
+                    if name in names_list:
+                        names_list.remove(name)
                         
-                        if len(ips_list) == 0:
+                        if len(names_list) == 0:
                             available_files.discard(file)
                             
                             del files_info[file]
+                        else:
+                            files_info[file] = size, num_parts, names_list, port_udp , hash
 
                 for part, info in list(files_parts_info.items()):
-                    _, ips, _ = info
-                    ips_list = list(ips)
-                    if address[0] in ips_list:
-                        ips_list.remove(address[0])
-                        files_parts_info[part] = (info[0], tuple(ips_list), info[2])
+                    size, names, port_udp = info
+                    names_list = list(names)
+                    
+                    if name in names_list:
+                        names_list.remove(name)
+                        files_parts_info[part] = (info[0], tuple(names_list), info[2])
 
-                        
-                        if len(ips_list) == 0:
+                        if len(names_list) == 0:
                             del files_parts_info[part]
+                        else:
+                            files_parts_info[part]= size, names_list, port_udp
             clientsocket.close()
             break
 
@@ -72,8 +79,8 @@ def handle_client(clientsocket, address, files_info, files_parts_info, available
             
             files_data = msg.decode("utf-8").split('|')
             files_data = list(filter(None, files_data))
-
-            ips_list = []
+            
+            names_list = []
             file_parts_aux = []
             with files_lock:
 
@@ -82,7 +89,8 @@ def handle_client(clientsocket, address, files_info, files_parts_info, available
                     file, size, hash = file.split(',')
                     file_name, dot = file.split('.')
                     
-                    ip = address[0]
+                    name,_,_ = socket.gethostbyaddr(address[0])
+                    name,_,_ = name.split('.')
 
                     num_parts_aux = int(size) // PARTSIZE
                     last_part_size = int(size) % PARTSIZE
@@ -94,54 +102,45 @@ def handle_client(clientsocket, address, files_info, files_parts_info, available
 
                     if num_parts_aux == 0 or last_part_size > 0:
                         file_parts_aux.append(f"{file_name}_part{num_parts_aux + 1}.{dot},{last_part_size}")
-
-                    
+                        
                     if file in files_info:
-                        
-                        _, _, _, port_udp, _ = files_info[file]
-                        ips_list = list(files_info[file][-2])  
-                        if ip not in ips_list:
-                            ips_list.append(ip)
-                        
-                        files_info[file] = (int(size), num_parts_aux + 1, tuple(ips_list),
-                                            port_udp, hash)  
+                        _,_,names,port_udp, _ = files_info[file]
+                        names_list = list(names)
+                        if name not in names_list:
+                            names_list.append(name)
+                            
+                        files_info[file] = (int(size), num_parts_aux + 1, tuple(names_list), port_udp, hash)
                     else:
-                        
-                        files_info[file] = (int(size), num_parts_aux + 1, [ip], port_udp, hash)
+                        files_info[file] = (int(size), num_parts_aux + 1, [name], port_udp, hash)
 
 
-                
-                ips_list_parts = []
+                names_list_parts = []
 
                 
                 for item in file_parts_aux:
                     part, size = item.split(',')
                     file_name, part_num = part.split('_part')
-                    ip = address[0]
-
+        
+                    name,_,_ = socket.gethostbyaddr(address[0])
+                    name,_,_ = name.split('.')
                     
-                    part_key = f"{file_name}_part{part_num}"
-
-                    
+                    part_key = f"{file_name}_part{part_num}" 
+                                          
                     if part_key in files_parts_info:
                         
-                        _, existing_ip, _ = files_parts_info[part_key]
-                        ips_list_parts = list(existing_ip)  
-                        if ip not in ips_list_parts:
-                            ips_list_parts.append(ip)
+                        _, existing_names, _ = files_parts_info[part_key]
                         
-                        files_parts_info[part_key] = (int(size), tuple(ips_list_parts), port_udp)
+                        names_list_parts = list(existing_names)  
+                        if name not in names_list_parts:
+                            names_list_parts.append(name)
+                        
+                        files_parts_info[part_key] = (int(size), tuple(names_list_parts), port_udp)
                     else:
-                        
-                        files_parts_info[part_key] = (int(size), [ip], port_udp)
-
+                        files_parts_info[part_key] = (int(size), [name], port_udp)
                     
                     for file in files_data:
                         file_name, _, hash = file.split(',')
                         available_files.add(file_name)
-
-                
-
 
         elif message_type == 2:
 
@@ -162,9 +161,13 @@ def handle_client(clientsocket, address, files_info, files_parts_info, available
             file_length = int.from_bytes(file_length, byteorder='big')
 
             file_request = clientsocket.recv(file_length).decode("utf-8")
+            
+            if file_request in files_info:
+                data = files_info[file_request]
+            
 
-            response_data = json.dumps(files_info)
-
+            response_data = json.dumps(data)
+    
             response_length = len(response_data)
             response_length_bytes = response_length.to_bytes(2, byteorder='big')
 
@@ -181,49 +184,130 @@ def handle_client(clientsocket, address, files_info, files_parts_info, available
             file_request = clientsocket.recv(file_length).decode("utf-8")
 
             file_aux, _ = file_request.split(".")
+                
 
             with files_lock:
+                
                 matching_parts = [part for part in files_parts_info if part.startswith(file_aux)]
+                
+                num_parts = len(matching_parts)
+                
+                loop_number = int(num_parts/200)
+                aux = num_parts%200
+                if aux:
+                    loop_number += 1
+                if loop_number == 1:
+                    parts_info = [(part, files_parts_info[part][1], files_parts_info[part][0], files_parts_info[part][2]) for part in matching_parts]
 
-            if matching_parts:
-                
-                with files_lock:
-                    parts_info = [(part, files_parts_info[part][1], files_parts_info[part][0], files_parts_info[part][2])
-                                for
-                                part in matching_parts]
+                    
+                    parts_info_str_list = [f"{name_list}" for _, name_list, _, _ in parts_info]
 
-                
-                parts_info_str_list = [f"{ip}" for part, ip, size, udp_port in parts_info]
+                    
+                    parts_info_str = '|'.join(parts_info_str_list)
 
-                
-                parts_info_str = '|'.join(parts_info_str_list)
-
-                
-                response_length = len(parts_info_str)
-                response_length_bytes = response_length.to_bytes(3, byteorder='big')
-                
-                with files_lock:
+                    
+                    response_length = len(parts_info_str)
+                    response_length_bytes = response_length.to_bytes(3, byteorder='big')
+                    
+                    
                     if file_request in files_info:
                         _, _, _, _, hash = files_info[file_request]
-                
-                hash_length = len(hash)
-                hash_length_bytes = hash_length.to_bytes(2, byteorder='big')
+                    
+                    hash_length = len(hash)
+                    hash_length_bytes = hash_length.to_bytes(2, byteorder='big')
 
+                    
+                    packet = response_length_bytes + hash_length_bytes + parts_info_str.encode("utf-8") + hash.encode("utf-8")
+                    
+                    clientsocket.send(packet)
+                    
+                    _ = clientsocket.recv(1)
+                else:
+                    i=1
+                    while i<=loop_number:
+                        
+                        if i==1:
+                            first_200_parts = matching_parts[:200]
+                            parts_info = [(part, files_parts_info[part][1], files_parts_info[part][0], files_parts_info[part][2]) for part in first_200_parts]
+                            parts_info_str_list = [f"{name_list}" for _, name_list, _, _ in parts_info]
+                            parts_info_str = '|'.join(parts_info_str_list)
+                            
+                            response_length = len(parts_info_str)
+                            response_length_bytes = response_length.to_bytes(3, byteorder='big')
+                            
+                            if file_request in files_info:
+                                _, _, _, _, hash = files_info[file_request]
+                                
+                            hash_length = len(hash)
+                            hash_length_bytes = hash_length.to_bytes(2, byteorder='big')
+                            
+                            packet = response_length_bytes + hash_length_bytes + parts_info_str.encode("utf-8") + hash.encode("utf-8")
+                            
+                            clientsocket.send(packet)
+                            
+                            _ = clientsocket.recv(1)
+                            
+                        elif i==loop_number:
+                            
+                            if aux:
+                                t=i-1
+                                t=t*200
+                                x=t+aux
+                                parts = matching_parts[t:x]
+                                parts_info = [(part, files_parts_info[part][1], files_parts_info[part][0], files_parts_info[part][2]) for part in parts]
+                                parts_info_str_list = [f"{name_list}" for _, name_list, _, _ in parts_info]
+                                parts_info_str = '|'.join(parts_info_str_list)
+                            
+                                response_length = len(parts_info_str)
+                                response_length_bytes = response_length.to_bytes(3, byteorder='big')
+                            
+                                packet = response_length_bytes + parts_info_str.encode("utf-8")
+                            
+                                clientsocket.send(packet)
+                            
+                                _ = clientsocket.recv(1)
+                                
+                            else:
+                                t=i-1
+                                t=t*200
+                                x=t+200
+                                parts = matching_parts[t:x]
+                                parts_info = [(part, files_parts_info[part][1], files_parts_info[part][0], files_parts_info[part][2]) for part in parts]
+                                parts_info_str_list = [f"{name_list}" for _, name_list, _, _ in parts_info]
+                                parts_info_str = '|'.join(parts_info_str_list)
+                            
+                                response_length = len(parts_info_str)
+                                response_length_bytes = response_length.to_bytes(3, byteorder='big')
+                        
+                                packet = response_length_bytes + parts_info_str.encode("utf-8")
+                            
+                                clientsocket.send(packet)
+                            
+                                _ = clientsocket.recv(1)
+                        
+                        else:
+                            
+                            t=i-1
+                            t=t*200
+                            x=t+200
+    
+                            parts = matching_parts[t:x]
+                            parts_info = [(part, files_parts_info[part][1], files_parts_info[part][0], files_parts_info[part][2]) for part in parts]
+                            parts_info_str_list = [f"{name_list}" for _, name_list, _, _ in parts_info]
+                            parts_info_str = '|'.join(parts_info_str_list)
+                        
+                            response_length = len(parts_info_str)
+                            response_length_bytes = response_length.to_bytes(3, byteorder='big')
+                        
+                            packet = response_length_bytes + parts_info_str.encode("utf-8")
+                        
+                            clientsocket.send(packet)
+                        
+                            _ = clientsocket.recv(1)
+                            
+                        i+=1
                 
-                packet = response_length_bytes + hash_length_bytes + parts_info_str.encode("utf-8") + hash.encode("utf-8")
-                
-                clientsocket.send(packet)
-            else:
-                
-                error_message = "File not available"
-                error_message_bytes = error_message.encode("utf-8")
-                length = len(error_message_bytes)
-
-                length_bytes = length.to_bytes(2, byteorder='big')
-                packet = length_bytes + error_message_bytes
-
-                clientsocket.send(packet)
-
+          
         elif message_type == 5:
 
             part_name_length_bytes = clientsocket.recv(2)
@@ -233,8 +317,9 @@ def handle_client(clientsocket, address, files_info, files_parts_info, available
             part_name = part_name_bytes.decode('utf-8')
 
             
-
-            ip = address[0]
+            name,_,_ = socket.gethostbyaddr(address[0])
+            name,_,_ = name.split('.')
+            
             part_name = ''.join(char for char in part_name if char.isprintable())
 
             file_name, dot = os.path.splitext(part_name)
@@ -243,30 +328,69 @@ def handle_client(clientsocket, address, files_info, files_parts_info, available
 
             with files_lock:
                 if part_name in files_parts_info:
-                    size, existing_ips, udp_port = files_parts_info[part_name]
-                    ips_list = list(existing_ips)
-                    if ip not in ips_list:
-                        ips_list.append(ip)
-                    files_parts_info[part_name] = (size, tuple(ips_list), udp_port)
+                    size, existing_names, udp_port = files_parts_info[part_name]
+                    names_list = list(existing_names)
+                    if name not in names_list:
+                        names_list.append(name)
+                    files_parts_info[part_name] = (size, tuple(names_list), udp_port)
 
             
                 if file_name_dot in files_info:
                     _, num_parts_expected, _, _, hash = files_info[file_name_dot]
                     client_parts_count = sum(
-                        1 for part in files_parts_info if part.startswith(file_name) and ip in files_parts_info[part][1])
+                        1 for part in files_parts_info if part.startswith(file_name) and name in files_parts_info[part][1])
                     
                     if client_parts_count >= num_parts_expected:
-                        size, _, ips_list, udp_port, hash = files_info[file_name_dot]
-                        ips_list = list(ips_list)
-                        if ip not in ips_list:
-                            ips_list.append(ip)
-                        files_info[file_name_dot] = (size, num_parts_expected, tuple(ips_list), udp_port, hash)
+                        size, _, names_list, udp_port, hash = files_info[file_name_dot]
+                        names_list = list(names_list)
+                        if name not in names_list:
+                            names_list.append(name)
+                        files_info[file_name_dot] = (size, num_parts_expected, tuple(names_list), udp_port, hash)
+        
+        elif message_type == 6:
+            file_name_length_bytes = clientsocket.recv(2)
+            file_name_length = int.from_bytes(file_name_length_bytes, byteorder='big')
 
+            file_name_bytes = clientsocket.recv(file_name_length)
+            file_name = file_name_bytes.decode('utf-8')
+
+            name,_,_ = socket.gethostbyaddr(address[0])
+            name,_,_ = name.split('.')
+
+
+            with files_lock:
+                if file_name in files_info:
                     
-                    
-                    
-                    
-                    
+                    size, num_parts, names, port_udp , hash = files_info[file_name]
+                    names_list = list(names)
+
+                    if name in names_list:
+                        names_list.remove(name)
+                        
+                        if len(names_list) == 0:
+                            available_files.discard(file)
+                            
+                            del files_info[file]
+                        else:
+                            files_info[file] = size, num_parts, names_list, port_udp , hash
+
+                
+                for part, info in list(files_parts_info.items()):
+                         
+                    file_aux,_ = file_name.split('.')
+                    if part.startswith(file_aux):
+                        size, names, port_udp = info
+                        names_list = list(names)
+                        
+                        if name in names_list:
+                            names_list.remove(name)
+                            files_parts_info[part] = (info[0], tuple(names_list), info[2])
+                            if len(names_list) == 0:
+                                del files_parts_info[part]
+                            else:
+                                files_parts_info[part]= size, names_list, port_udp
+            
+            
 
 
 def run_server(server_name, port):
@@ -403,11 +527,10 @@ def run_client(server_name, port, directory):
         type_2(client, text_area)
 
     def get_file_info():
-        file_request = input("Enter the file you want to get information about: ")
-        type_3(client, file_request, text_area)
+        type_3(client, text_area, host_name)
 
     def download_file():
-        type_4(client, udp_receive_socket, directory, udp_port)
+        type_4(client, udp_receive_socket, directory, udp_port, text_area, host_name)
 
     def exit_program():
         type_0(client)
@@ -440,8 +563,6 @@ def run_client(server_name, port, directory):
 
     exit_button = Button(frame, text="Exit", command=exit_program, bg="#FF5722", fg="white")
     exit_button.grid(row=4, column=0, columnspan=2, pady=10)
-    
-    
     
 
     root.mainloop()
@@ -578,11 +699,21 @@ def type_2(client, text_area):
         return available_files
 
     
-def type_3(client, file_request, text_area):
+def type_3(client, text_area, host_name,file_request=None):
+    
+    available_files = type_2(client,None)
     message_type = 3
-
-    if not file_request:
-        file_request = input("Enter the file you want to get information about: ")
+    if text_area!=None: 
+        file_request=None
+        while file_request not in available_files:
+            file_request = simpledialog.askstring(f"{host_name}","Enter the file you want to get information about:")
+            if file_request is None:
+                return
+            
+            if file_request not in available_files:
+                text_area.insert(END, f"Invalid file request: {file_request}\n")
+                text_area.see(END)  # Ensure that the inserted text is visible
+        
 
     file_lenght = len(file_request)
     file_lenght_bytes = file_lenght.to_bytes(2, byteorder='big')
@@ -599,30 +730,33 @@ def type_3(client, file_request, text_area):
 
     response_data = json.loads(received_data.decode("utf-8"))
 
-    if response_data.get(file_request):
-        file_size, num_parts, ips_list, _, hash = response_data[file_request]
+    file_size, num_parts, names_list, _, hash = response_data
 
-        ips_name = []
-        for ip in ips_list:
-            name,_,_ = socket.gethostbyaddr(ip)
-            name,_,_ = name.split('.')
-            ips_name.append(name)
-            
+    locations = ', '.join(names_list)
         
+    if text_area!=None:   
         text_area.insert("end", f"\nFile Information: {file_request}\n")
-        text_area.insert("end", f"Size: {file_size} bytes\nNumber of Parts: {num_parts}\nLocations: {ips_name}\n")
+        text_area.insert("end", f"Size: {file_size} bytes\nNumber of Parts: {num_parts}\nLocations: {locations}\n")
     else:
-        text_area.insert("end", f"\nFile not found: {file_request}\n")
+         
+        return response_data
 
 
-
-def type_4(client, udp_receive_socket, directory, udp_port):
+def type_4(client, udp_receive_socket, directory, udp_port, text_area, host_name):
     available_files = type_2(client,None)
     
-    file_request = ''
+    file_request = None
     while file_request not in available_files:
-        file_request = input("Enter the file name to Download: ")
-
+        file_request = simpledialog.askstring(f"{host_name}", "Enter the file name to Download:")
+        if file_request is None:
+            return
+        # Check if the entered file_request is valid
+        if file_request not in available_files:
+            text_area.insert(END, f"Invalid file request: {file_request}\n")
+            text_area.see(END)  # Ensure that the inserted text is visible
+        
+    response = type_3(client,None,host_name, file_request)
+    _, num_parts, _, _, _ = response
     message_type = 4
     file_length = len(file_request)
     file_length_bytes = file_length.to_bytes(2, byteorder='big')
@@ -631,62 +765,114 @@ def type_4(client, udp_receive_socket, directory, udp_port):
 
     packet = message_type_bytes + file_length_bytes + file_request.encode("utf-8")
     client.send(packet)
-
-    response_length_bytes = client.recv(3)
-    response_length = int.from_bytes(response_length_bytes, byteorder='big')
     
-    hash_length_bytes = client.recv(2)
-    hash_length = int.from_bytes(hash_length_bytes, byteorder='big')
-
-    received_data = client.recv(response_length)
-    response_data = received_data.decode("utf-8")
+    loop_number = int(num_parts/200)
+    aux = num_parts%200
+    full_str = None
     
-    hash_data = client.recv(hash_length)
-    received_hash = hash_data.decode("utf-8")
+    if aux:
+        loop_number += 1
+        
+    if loop_number==1:
+        
+        response_length_bytes = client.recv(3)
+        response_length = int.from_bytes(response_length_bytes, byteorder='big')
+    
+        hash_length_bytes = client.recv(2)
+        hash_length = int.from_bytes(hash_length_bytes, byteorder='big')
 
-    i = 0
+        received_data = client.recv(response_length)
+        response_data = received_data.decode("utf-8")
+        
+        hash_data = client.recv(hash_length)
+        received_hash = hash_data.decode("utf-8")
+        
+        full_str = response_data
+        
+        confirmation=1
+        
+        confirmation_bytes = confirmation.to_bytes(1, byteorder='big')
+        
+        client.send(confirmation_bytes)
+        
+        
+    else:
+        r=1
+        while r<=loop_number:
+            
+            if r==1:
+                response_length_bytes = client.recv(3)
+                response_length = int.from_bytes(response_length_bytes, byteorder='big')
+    
+                hash_length_bytes = client.recv(2)
+                hash_length = int.from_bytes(hash_length_bytes, byteorder='big')
+
+                received_data = client.recv(response_length)
+                response_data = received_data.decode("utf-8")
+            
+                hash_data = client.recv(hash_length)
+                received_hash = hash_data.decode("utf-8")
+                
+                full_str = response_data
+            
+                confirmation=1
+            
+                confirmation_bytes = confirmation.to_bytes(1, byteorder='big')
+            
+                client.send(confirmation_bytes)
+                
+                
+                
+            else:
+                
+                response_length_bytes = client.recv(3)
+                response_length = int.from_bytes(response_length_bytes, byteorder='big')
+                
+                received_data = client.recv(response_length)
+                response_data = received_data.decode("utf-8")
+                
+                full_str = full_str +'|'+ response_data
+                
+                confirmation=1
+            
+                confirmation_bytes = confirmation.to_bytes(1, byteorder='big')
+            
+                client.send(confirmation_bytes)
+            r+=1
+        
     len_aux = 0
 
     
-    if response_data == "File not available":
+    if full_str == "File not available":
         print("File not found")
     else:
-        parts_info_list = response_data.split('|')
-       
-        h=0
+        parts_info_list = full_str.split('|')
+        i=len(parts_info_list)
         part,dot = file_request.split('.')
-                    
+        h=0
         for part_info in parts_info_list:
-            #print(part_info)
-            ip_list = eval(part_info)
+            names_list = eval(part_info)
             part_name = f"{part}_part{h + 1}.{dot}"
             h +=1
 
-            udp_message_type = 1
-            udp_message_type_bytes = udp_message_type.to_bytes(1, byteorder='big')
             part_name_bytes = part_name.encode("utf-8")
 
-            packet = udp_message_type_bytes + part_name_bytes
+            packet = part_name_bytes
             
-            if i == 0:
-                len_aux = len(ip_list)
+            if h == 1:
+                len_aux = len(names_list)
 
-            index_ip = random.randint(0, len_aux - 1)
+            index_name = random.randint(0, len_aux - 1)
 
-            ip = ip_list[index_ip]
+            name = names_list[index_name]
             key = part_name
-            value = (ip_list, index_ip, 0)
+            value = (names_list, index_name, 0)
             
             with download_lock:
                 download_dict[key] = value
-            i = i + 1
             
-            udp_receive_socket.sendto(packet, (ip, udp_port + 1))
-            
-            
-
-           
-
+            udp_receive_socket.sendto(packet, (socket.gethostbyname(name), udp_port + 1))
+        
     control_download = 1
     tamanho = 0
     flag_aux = 0
@@ -732,31 +918,30 @@ def type_4(client, udp_receive_socket, directory, udp_port):
                     q=0
                     for key, values in download_dict.items():
                         
-                        ip_list, index_ip, flag = values
+                        names_list, index_name, flag = values
 
                         if flag == 0:
                             q +=1
                             try:
-                                udp_message_type = 1
-                                udp_message_type_bytes = udp_message_type.to_bytes(1, byteorder='big')
+                                
                                 part_name_bytes = key.encode("utf-8")
 
-                                packet = udp_message_type_bytes + part_name_bytes
+                                packet = part_name_bytes
 
-                                len_aux = len(ip_list)
+                                len_aux = len(names_list)
 
                                 if len_aux > 1:
                                     for y in range(2):
-                                        if y != index_ip:
-                                            ip = ip_list[y]
-                                            udp_receive_socket.sendto(packet, (ip, int(udp_port) + 1))
+                                        if y != index_name:
+                                            name = names_list[y]
+                                            udp_receive_socket.sendto(packet, (socket.gethostbyname(name), int(udp_port) + 1))
                                             break
                             except Exception as e:
                                 print(f"Erro ao enviar pacote: {e}")
                             else:
                                 try:
-                                    ip = ip_list[index_ip]
-                                    udp_receive_socket.sendto(packet, (ip, int(udp_port) + 1))
+                                    name = names_list[index_name]
+                                    udp_receive_socket.sendto(packet, (socket.gethostbyname(name), int(udp_port) + 1))
                                 except Exception as e:
                                     print(f"Erro ao enviar pacote: {e}")
                     control_download += 1
@@ -770,11 +955,27 @@ def type_4(client, udp_receive_socket, directory, udp_port):
     hash = sha1(file_path,file_size)
     
     if hash == received_hash:
-        print(f"File saved at: {file_path}")
+        text_area.insert("end",f"File saved at: {file_path}")
     else:
         file_parts_directory = os.path.join(os.path.dirname(directory),f"{file_request.split('.')[0]}_parts")
         eliminar_diretoria(file_parts_directory)
-        print(f"Download Error. Hashed checksum doesn't match. Try again") 
+        os.rmdir(file_path)
+
+        message_type = 6
+        message_type_bytes = message_type.to_bytes(1, byteorder='big')
+        part_name_bytes = file_request.encode('utf-8')
+
+        part_size = len(file_request)
+        part_size_bytes = part_size.to_bytes(2, byteorder='big')
+
+        # Criar o pacote com o tipo de mensagem e o nome da parte
+        packet = message_type_bytes + part_size_bytes + part_name_bytes
+
+        client.send(packet)
+        text_area.insert("end",f"Download Error. Hashed checksum doesn't match. Try again") 
+        
+    
+    
 
 
 
