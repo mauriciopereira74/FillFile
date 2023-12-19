@@ -17,9 +17,10 @@ HEADERSIZE = 64100
 global condition
 queue_recv = queue.Queue()
 download_dict = {}
+best_clients=[]
 
 
-def handle_client(clientsocket, address, files_info, files_parts_info, available_files, files_lock):
+def handle_client(clientsocket, address, files_info, files_parts_info, available_files, files_lock,connected_clients):
     while True:
 
         message_type_bytes = clientsocket.recv(1)
@@ -152,7 +153,7 @@ def handle_client(clientsocket, address, files_info, files_parts_info, available
 
             packet = length_bytes + available_files_bytes
 
-            clientsocket.sendall(packet)
+            clientsocket.send(packet)
 
 
         elif message_type == 3:
@@ -389,6 +390,26 @@ def handle_client(clientsocket, address, files_info, files_parts_info, available
                                 del files_parts_info[part]
                             else:
                                 files_parts_info[part]= size, names_list, port_udp
+                                
+        elif message_type == 7:
+            
+            with files_lock:
+                
+                modified_clients_set = {client.split('.')[0] for client in connected_clients}
+
+                modified_clients = list(modified_clients_set)
+
+               
+                modified_clients_str = '|'.join(modified_clients)
+
+                modified_clients_bytes = modified_clients_str.encode("utf-8")
+                length = len(modified_clients_bytes)
+
+                length_bytes = length.to_bytes(2, byteorder='big')
+
+                packet = length_bytes + modified_clients_bytes
+
+                clientsocket.send(packet)
             
             
 
@@ -410,9 +431,10 @@ def run_server(server_name, port):
     while True:
         clientsocket, address = server.accept()
         print(f"Connected to {address}")
-        connected_clients.append(address)
+        name,_,_ = socket.gethostbyaddr(address[0])
+        connected_clients.append(name)
         client_handler = threading.Thread(target=handle_client, args=(
-        clientsocket, address, files_info, files_parts_info, available_files, files_lock))
+        clientsocket, address, files_info, files_parts_info, available_files, files_lock,connected_clients))
         client_handler.start()
 
 
@@ -480,6 +502,7 @@ def udp_sender(udp_socket, udp_receive_socket, directory):
             
 
 
+
 def run_client(server_name, port, directory):
     
     os.environ['DISPLAY'] = ':0.0'
@@ -498,6 +521,7 @@ def run_client(server_name, port, directory):
 
     udp_receive_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     udp_receive_socket.bind(("0.0.0.0", udp_receive_port))
+    
     
     for y in range(20):
         
@@ -530,7 +554,8 @@ def run_client(server_name, port, directory):
         type_3(client, text_area, host_name)
 
     def download_file():
-        type_4(client, udp_receive_socket, directory, udp_port, text_area, host_name)
+        best_clients=type_7(client,udp_receive_socket,directory, udp_port, host_name,text_area)
+        type_4(client, udp_receive_socket, directory, udp_port, text_area, host_name, best_clients)
 
     def exit_program():
         type_0(client)
@@ -538,9 +563,12 @@ def run_client(server_name, port, directory):
         
     def clear_output(text_area):
         text_area.delete("1.0", END)
+        
+        
+        
 
     
-
+    
     root.configure(bg="#f0f0f0")
 
     
@@ -559,12 +587,11 @@ def run_client(server_name, port, directory):
     download_button.grid(row=2, column=0, columnspan=2, pady=10)
     
     clear_button = Button(frame, text="Clear Output", command=lambda: clear_output(text_area), bg="#607D8B", fg="white")
-    clear_button.grid(row=3, column=0, columnspan=2, pady=10)  # Adjusted row position
+    clear_button.grid(row=3, column=0, columnspan=2, pady=10)  
 
     exit_button = Button(frame, text="Exit", command=exit_program, bg="#FF5722", fg="white")
     exit_button.grid(row=4, column=0, columnspan=2, pady=10)
     
-
     root.mainloop()
     udp_socket.close()
     udp_receive_socket.close()
@@ -598,7 +625,7 @@ def eliminar_diretoria(diretoria):
 def split_file(file_path, chunk_size, output_directory):
     if os.path.isfile(file_path):
         file_name, file_extension = os.path.splitext(os.path.basename(file_path))
-        file_parts_directory = os.path.join(output_directory, f"{file_name}_parts")  # Caminho de saída modificado
+        file_parts_directory = os.path.join(output_directory, f"{file_name}_parts")  
         if not os.path.exists(file_parts_directory):
             os.makedirs(file_parts_directory)
             with open(file_path, 'rb') as file:
@@ -648,8 +675,13 @@ def type_0(client):
 
 
 def type_1(client, directory, port):
+    
     message_type = 1
-
+    
+    with open(os.path.join((directory),"%temp.txt"), 'wb') as part_file:
+            data = "test"
+            part_file.write(data.encode("utf-8"))
+            
     files_list = [file for file in os.listdir(directory) if not file.startswith('.')]
     files_list.sort()
 
@@ -659,7 +691,8 @@ def type_1(client, directory, port):
         file_directory = os.path.dirname(directory)
         split_file(os.path.join(directory, file), PARTSIZE, file_directory)
         
-
+    
+    files_list.remove("%temp.txt")
     files_list_str = '|'.join([f"{file},{os.path.getsize(os.path.join(directory, file))},{sha1(os.path.join(directory, file),os.path.getsize(os.path.join(directory, file)))}" for file in files_list]) + '|'
 
     files_list_bytes = files_list_str.encode("utf-8")
@@ -703,7 +736,7 @@ def type_3(client, text_area, host_name,file_request=None):
     
     available_files = type_2(client,None)
     message_type = 3
-    if text_area!=None: 
+    if text_area!=None:
         file_request=None
         while file_request not in available_files:
             file_request = simpledialog.askstring(f"{host_name}","Enter the file you want to get information about:")
@@ -712,7 +745,7 @@ def type_3(client, text_area, host_name,file_request=None):
             
             if file_request not in available_files:
                 text_area.insert(END, f"Invalid file request: {file_request}\n")
-                text_area.see(END)  # Ensure that the inserted text is visible
+                text_area.see(END)  
         
 
     file_lenght = len(file_request)
@@ -742,18 +775,18 @@ def type_3(client, text_area, host_name,file_request=None):
         return response_data
 
 
-def type_4(client, udp_receive_socket, directory, udp_port, text_area, host_name):
+def type_4(client, udp_receive_socket, directory, udp_port, text_area, host_name, best_clients):
     available_files = type_2(client,None)
-    
+    clients_download=[]
     file_request = None
     while file_request not in available_files:
         file_request = simpledialog.askstring(f"{host_name}", "Enter the file name to Download:")
         if file_request is None:
             return
-        # Check if the entered file_request is valid
+        
         if file_request not in available_files:
             text_area.insert(END, f"Invalid file request: {file_request}\n")
-            text_area.see(END)  # Ensure that the inserted text is visible
+            text_area.see(END)  
         
     response = type_3(client,None,host_name, file_request)
     _, num_parts, _, _, _ = response
@@ -858,15 +891,26 @@ def type_4(client, udp_receive_socket, directory, udp_port, text_area, host_name
             part_name_bytes = part_name.encode("utf-8")
 
             packet = part_name_bytes
+            clients_download = [(client_aux, time) for client_aux, time in best_clients if client_aux in names_list]
             
-            if h == 1:
-                len_aux = len(names_list)
-
-            index_name = random.randint(0, len_aux - 1)
-
-            name = names_list[index_name]
+            len_aux = len(clients_download)
+            
+            if len_aux>1:
+                best_time=0.0
+                
+                for name, value in clients_download:
+                    best_time=value
+                    break
+                
+                clients_download = [(client_aux, time) for client_aux, time in clients_download if best_time - time <= 1]
+                len_aux = len(clients_download)
+            if len_aux >1:
+                index_name = random.randint(0, len_aux - 1)
+            else: 
+                index_name=0
+            name = clients_download[index_name][0]
             key = part_name
-            value = (names_list, index_name, 0)
+            value = (clients_download, index_name, 0)
             
             with download_lock:
                 download_dict[key] = value
@@ -895,7 +939,7 @@ def type_4(client, udp_receive_socket, directory, udp_port, text_area, host_name
                         part_size = len(part_name)
                         part_size_bytes = part_size.to_bytes(2, byteorder='big')
 
-                        # Criar o pacote com o tipo de mensagem e o nome da parte
+                        
                         packet = message_type_bytes + part_size_bytes + part_name_bytes
 
                         client.send(packet)
@@ -904,7 +948,7 @@ def type_4(client, udp_receive_socket, directory, udp_port, text_area, host_name
                         print(f"Erro ao enviar pacote: {e}")
 
             else:
-                print(f"Control Download:{control_download}")
+                
                 if control_download == 30:
                     file_parts_directory = os.path.join(os.path.dirname(directory),
                                                         f"{part_name.split('_part')[0]}_parts")
@@ -933,14 +977,14 @@ def type_4(client, udp_receive_socket, directory, udp_port, text_area, host_name
                                 if len_aux > 1:
                                     for y in range(2):
                                         if y != index_name:
-                                            name = names_list[y]
+                                            name = names_list[y][0]
                                             udp_receive_socket.sendto(packet, (socket.gethostbyname(name), int(udp_port) + 1))
                                             break
                             except Exception as e:
                                 print(f"Erro ao enviar pacote: {e}")
                             else:
                                 try:
-                                    name = names_list[index_name]
+                                    name = names_list[index_name][0]
                                     udp_receive_socket.sendto(packet, (socket.gethostbyname(name), int(udp_port) + 1))
                                 except Exception as e:
                                     print(f"Erro ao enviar pacote: {e}")
@@ -968,16 +1012,134 @@ def type_4(client, udp_receive_socket, directory, udp_port, text_area, host_name
         part_size = len(file_request)
         part_size_bytes = part_size.to_bytes(2, byteorder='big')
 
-        # Criar o pacote com o tipo de mensagem e o nome da parte
+        
         packet = message_type_bytes + part_size_bytes + part_name_bytes
 
         client.send(packet)
         text_area.insert("end",f"Download Error. Hashed checksum doesn't match. Try again") 
         
+        
+def type_7(client,udp_receive_socket, directory, udp_port, host_name,text_area):
     
+    message_type = 7
+    message_type_bytes = message_type.to_bytes(1, byteorder='big')
+
+    packet = message_type_bytes
+
+    client.send(packet)
+
+    length_bytes = client.recv(2)
+    length = int.from_bytes(length_bytes, byteorder='big')
+
+    connected_clients_bytes = client.recv(length)
+    connected_clients_str = connected_clients_bytes.decode("utf-8")
+    connected_clients = connected_clients_str.split('|')
+    connected_clients.remove(host_name)
     
+    times_list = {}
+    for client_connected in connected_clients:
+        ip = socket.gethostbyname(client_connected)
+        part="%temp_part1.txt"
+        key = part
+        names_list=[client_connected]
+        value = (names_list, 0, 0)
+        
+        with download_lock:
+            download_dict[key] = value
+            
+        
+        packet = part.encode("utf-8")
+        start_time = time.time() 
+        udp_receive_socket.sendto(packet, (ip, udp_port + 1))
+        
+        control_download = 1
+        file_request="%temp.txt"
+        tamanho = 0
+        flag_aux = 0
+        q=-1
+        i=1
+        while tamanho < i:
+            with lock:
 
+                reason = condition.wait(timeout=1)
 
+                if reason or q==0:
+                    
+                    tamanho = tamanho + queue_recv.qsize()
+                    for t in range(queue_recv.qsize()):
+                        part_name = queue_recv.get()
+                        try:
+                            message_type = 5
+                            message_type_bytes = message_type.to_bytes(1, byteorder='big')
+                            part_name_bytes = part_name.encode('utf-8')
+
+                            part_size = len(part_name)
+                            part_size_bytes = part_size.to_bytes(2, byteorder='big')
+
+                            
+                            packet = message_type_bytes + part_size_bytes + part_name_bytes
+
+                            client.send(packet)
+                            q=-1
+                        except Exception as e:
+                            print(f"Erro ao enviar pacote: {e}")
+
+                else:
+                    print(f"Control Download:{control_download}")
+                    if control_download == 30:
+                        file_parts_directory = os.path.join(os.path.dirname(directory),
+                                                            f"{part_name.split('_part')[0]}_parts")
+                        eliminar_diretoria(file_parts_directory)
+                        print(
+                            f"Download Error, Unable to Download all the parts of the %temp.txt. File Corrupted or not Available. Try again")
+                        flag_aux = 1
+
+                        break
+                    with download_lock:
+                        q=0
+                        for key, values in download_dict.items():
+                            
+                            names_list, index_name, flag = values
+
+                            if flag == 0:
+                                q +=1
+                                try:
+                                    
+                                    part_name_bytes = key.encode("utf-8")
+
+                                    packet = part_name_bytes
+
+                                    len_aux = len(names_list)
+
+                                    if len_aux > 1:
+                                        for y in range(2):
+                                            if y != index_name:
+                                                name = names_list[y]
+                                                udp_receive_socket.sendto(packet, (socket.gethostbyname(name), int(udp_port) + 1))
+                                                break
+                                except Exception as e:
+                                    print(f"Erro ao enviar pacote: {e}")
+                                else:
+                                    try:
+                                        name = names_list[index_name]
+                                        udp_receive_socket.sendto(packet, (socket.gethostbyname(name), int(udp_port) + 1))
+                                    except Exception as e:
+                                        print(f"Erro ao enviar pacote: {e}")
+                        control_download += 1
+
+        if flag_aux == 0:
+            concatenate_file_parts(file_request, directory)
+            
+        end_time = time.time()  
+        elapsed_time = end_time - start_time  
+            
+        times_list[client_connected] = elapsed_time
+        
+    best_clients = sorted(times_list.items(), key=lambda x: x[1])
+    best_clients = [(client_aux,time) for client_aux, time in best_clients] 
+    
+    return best_clients
+        
 
 def print_usage():
     print("===========================================================================")
@@ -998,12 +1160,10 @@ if __name__ == "__main__":
         condition = threading.Condition(lock)
         is_server = False
 
-        # Check if the script is run as a server or a client
         if (sys.argv[1] == "help"):
             print_usage()
 
         if len(sys.argv) == 4 and sys.argv[1] == '1':
-            # Run the server with the specified IP address
             is_server = True
             run_server(sys.argv[2], sys.argv[3])
 
