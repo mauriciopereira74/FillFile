@@ -999,7 +999,7 @@ def type_4(client, udp_receive_socket, directory, udp_port, text_area, host_name
     hash = sha1(file_path,file_size)
     
     if hash == received_hash:
-        text_area.insert("end",f"File saved at: {file_path}")
+        text_area.insert("end",f"File saved at: {file_path}\n")
     else:
         file_parts_directory = os.path.join(os.path.dirname(directory),f"{file_request.split('.')[0]}_parts")
         eliminar_diretoria(file_parts_directory)
